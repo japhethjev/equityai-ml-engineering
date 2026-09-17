@@ -1,3 +1,5 @@
+import os
+
 from openai import OpenAI
 
 from app.rag.embedding_service import embed_text
@@ -5,12 +7,29 @@ from app.rag.vector_store import hybrid_search
 from app.rag.reranker import rerank_results
 
 
-client = OpenAI()
+def get_openai_client() -> OpenAI:
+    """
+    Create an OpenAI client only when answer generation
+    actually requires one.
+
+    This allows application modules and automated tests
+    to load without requiring OpenAI credentials.
+    """
+
+    api_key = os.getenv("OPENAI_API_KEY")
+
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY environment variable is not set."
+        )
+
+    return OpenAI(api_key=api_key)
 
 
 def answer_question(query: str) -> dict:
     """
-    Answer a user question using retrieved document evidence only.
+    Answer a user question using retrieved
+    document evidence only.
     """
 
     query_embedding = embed_text(query)
@@ -21,7 +40,10 @@ def answer_question(query: str) -> dict:
         limit=5,
     )
 
-    ranked = rerank_results(query, retrieved)
+    ranked = rerank_results(
+        query,
+        retrieved,
+    )
 
     top_results = ranked[:3]
 
@@ -55,6 +77,9 @@ USER QUESTION:
 EVIDENCE:
 {context}
 """
+
+    # Create OpenAI client only when generation is required.
+    client = get_openai_client()
 
     response = client.responses.create(
         model="gpt-5-mini",
