@@ -1,0 +1,46 @@
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: equityai-postgres
+
+    environment:
+      POSTGRES_USER: equityai
+      POSTGRES_PASSWORD: equityai_dev_password
+      POSTGRES_DB: equityai
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U equityai -d equityai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: equityai-api
+
+    network_mode: host
+
+    env_file:
+      - .env
+
+    environment:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: equityai
+      DB_USER: equityai
+      DB_PASSWORD: equityai_dev_password
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

@@ -1,3 +1,10 @@
 pypdf
 pytest
 python-dotenv
+openai
+psycopg[binary]
+pgvector
+numpy
+fastapi
+uvicorn
+python-multipart
