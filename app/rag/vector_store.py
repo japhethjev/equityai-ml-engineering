@@ -314,3 +314,61 @@ def hybrid_search(
         }
         for row in rows
     ]
+
+def list_documents() -> list[dict]:
+    """
+    Return all documents currently stored in the
+    EquityAI knowledge base with page and chunk counts.
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    document,
+                    COUNT(DISTINCT page) AS pages,
+                    COUNT(*) AS chunks
+                FROM document_chunks
+                GROUP BY document
+                ORDER BY document
+                """
+            )
+
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "document": row[0],
+            "pages": row[1],
+            "chunks": row[2],
+        }
+        for row in rows
+    ]
+
+
+def delete_document(
+    document_name: str,
+) -> int:
+    """
+    Delete all chunks and embeddings belonging
+    to a document.
+
+    Returns the number of deleted chunks.
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM document_chunks
+                WHERE document = %s
+                """,
+                (document_name,),
+            )
+
+            deleted_count = cursor.rowcount
+
+        connection.commit()
+
+    return deleted_count

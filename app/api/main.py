@@ -13,7 +13,11 @@ from pydantic import BaseModel
 
 from app.rag.ingest import ingest_document
 from app.rag.rag_service import answer_question
-from app.rag.vector_store import get_connection
+from app.rag.vector_store import (
+    delete_document,
+    get_connection,
+    list_documents,
+)
 
 
 logging.basicConfig(
@@ -32,6 +36,11 @@ app = FastAPI(
 
 class QuestionRequest(BaseModel):
     question: str
+
+
+# =========================================================
+# HEALTH CHECK
+# =========================================================
 
 
 @app.get("/health")
@@ -69,6 +78,11 @@ def health():
                 "database": "down",
             },
         )
+
+
+# =========================================================
+# RAG QUESTION ENDPOINT
+# =========================================================
 
 
 @app.post("/ask")
@@ -110,6 +124,11 @@ def ask(request: QuestionRequest):
         )
 
 
+# =========================================================
+# DOCUMENT UPLOAD
+# =========================================================
+
+
 @app.post("/documents/upload")
 def upload_document(
     file: UploadFile = File(...),
@@ -139,6 +158,9 @@ def upload_document(
             detail="Only PDF files are supported.",
         )
 
+    # Strip directory components from the supplied filename.
+    filename = Path(filename).name
+
     logger.info(
         "Received document upload: %s",
         filename,
@@ -147,7 +169,10 @@ def upload_document(
     temp_path = None
 
     try:
+        # ---------------------------------------------
         # Save uploaded PDF temporarily
+        # ---------------------------------------------
+
         with tempfile.NamedTemporaryFile(
             delete=False,
             suffix=".pdf",
@@ -160,7 +185,10 @@ def upload_document(
 
             temp_path = temp_file.name
 
+        # ---------------------------------------------
         # Run ingestion and capture statistics
+        # ---------------------------------------------
+
         result = ingest_document(
             temp_path,
             document_name=filename,
@@ -171,7 +199,10 @@ def upload_document(
             filename,
         )
 
+        # ---------------------------------------------
         # Return ingestion statistics
+        # ---------------------------------------------
+
         return {
             "status": "success",
             "document": result["document"],
@@ -204,3 +235,94 @@ def upload_document(
 
             if temp_file_path.exists():
                 temp_file_path.unlink()
+
+
+# =========================================================
+# DOCUMENT INVENTORY
+# =========================================================
+
+
+@app.get("/documents")
+def get_documents():
+    """
+    Return all documents currently indexed
+    in the EquityAI knowledge base.
+    """
+
+    try:
+        documents = list_documents()
+
+        logger.info(
+            "Retrieved document inventory: %s documents",
+            len(documents),
+        )
+
+        return {
+            "total_documents": len(documents),
+            "documents": documents,
+        }
+
+    except Exception:
+        logger.exception(
+            "Failed to retrieve documents"
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to retrieve documents.",
+        )
+
+
+# =========================================================
+# DOCUMENT DELETION
+# =========================================================
+
+
+@app.delete("/documents/{document_name}")
+def remove_document(
+    document_name: str,
+):
+    """
+    Delete a document and all associated chunks
+    and embeddings from the knowledge base.
+    """
+
+    # Strip directory components for safety.
+    document_name = Path(document_name).name
+
+    try:
+        deleted_chunks = delete_document(
+            document_name
+        )
+
+        if deleted_chunks == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="Document not found.",
+            )
+
+        logger.info(
+            "Deleted document: %s (%s chunks)",
+            document_name,
+            deleted_chunks,
+        )
+
+        return {
+            "status": "success",
+            "document": document_name,
+            "deleted_chunks": deleted_chunks,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        logger.exception(
+            "Failed to delete document: %s",
+            document_name,
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to delete document.",
+        )
