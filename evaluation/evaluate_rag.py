@@ -1,20 +1,25 @@
+import csv
 import json
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.rag.rag_service import answer_question
 
 
 DATASET_PATH = Path("evaluation/rag_eval_dataset.json")
+RESULTS_DIR = Path("evaluation/results")
+LATEST_JSON_PATH = RESULTS_DIR / "latest.json"
+LATEST_CSV_PATH = RESULTS_DIR / "latest.csv"
 
 ABSTENTION_TEXT = (
     "I could not find sufficient evidence "
     "in the provided documents."
 )
 
-# Relative tolerance for approximate financial answers.
-# 0.5% allows reasonable display rounding while remaining strict.
+# Maximum relative numerical difference accepted for
+# approximate financial answers.
 NUMERIC_REL_TOLERANCE = 0.005
 
 
@@ -26,7 +31,9 @@ def load_dataset() -> list[dict]:
         return json.load(file)
 
 
-def normalize_financial_text(text: str | None) -> str:
+def normalize_financial_text(
+    text: str | None,
+) -> str:
     """
     Normalize common financial notation for textual comparison.
     """
@@ -43,11 +50,13 @@ def normalize_financial_text(text: str | None) -> str:
         "trillion",
         text,
     )
+
     text = re.sub(
         r"\bbn\b",
         "billion",
         text,
     )
+
     text = re.sub(
         r"\bmn\b",
         "million",
@@ -74,7 +83,9 @@ def is_abstention(answer: str) -> bool:
     )
 
 
-def unit_multiplier(unit: str | None) -> float:
+def unit_multiplier(
+    unit: str | None,
+) -> float:
     """
     Convert financial magnitude words into a common scale.
     """
@@ -93,10 +104,15 @@ def unit_multiplier(unit: str | None) -> float:
         "mn": 1_000_000,
     }
 
-    return multipliers.get(unit, 1.0)
+    return multipliers.get(
+        unit,
+        1.0,
+    )
 
 
-def extract_financial_values(text: str | None) -> list[float]:
+def extract_financial_values(
+    text: str | None,
+) -> list[float]:
     """
     Extract currency-denominated financial values and convert
     them to a common base-unit representation.
@@ -144,7 +160,9 @@ def extract_financial_values(text: str | None) -> list[float]:
     return values
 
 
-def extract_percentages(text: str | None) -> list[float]:
+def extract_percentages(
+    text: str | None,
+) -> list[float]:
     """
     Extract percentage values from text.
     """
@@ -196,24 +214,18 @@ def numeric_answer_match(
 ) -> bool:
     """
     Compare financial numbers after converting units.
-
-    This allows economically equivalent representations such as:
-
-        ₦3,433 billion
-        ₦3.433 trillion
-
-    and reasonable rounding such as:
-
-        ₦2.50 trillion
-        ₦2.504 trillion
     """
 
-    expected_values = extract_financial_values(
-        expected_answer
+    expected_values = (
+        extract_financial_values(
+            expected_answer
+        )
     )
 
-    actual_values = extract_financial_values(
-        answer
+    actual_values = (
+        extract_financial_values(
+            answer
+        )
     )
 
     if expected_values:
@@ -225,12 +237,16 @@ def numeric_answer_match(
                 ):
                     return True
 
-    expected_percentages = extract_percentages(
-        expected_answer
+    expected_percentages = (
+        extract_percentages(
+            expected_answer
+        )
     )
 
-    actual_percentages = extract_percentages(
-        answer
+    actual_percentages = (
+        extract_percentages(
+            answer
+        )
     )
 
     if expected_percentages:
@@ -250,15 +266,17 @@ def answer_matches(
     expected_answer: str | None,
 ) -> bool:
     """
-    Evaluate an answer using both normalized text
-    and numerical financial equivalence.
+    Evaluate an answer using normalized text and
+    numerical financial equivalence.
     """
 
     if expected_answer is None:
         return False
 
     normalized_answer = (
-        normalize_financial_text(answer)
+        normalize_financial_text(
+            answer
+        )
     )
 
     normalized_expected = (
@@ -267,18 +285,16 @@ def answer_matches(
         )
     )
 
-    # First use the existing textual comparison.
-    if normalized_expected in normalized_answer:
-        return True
-
-    # Then check numerical equivalence.
-    if numeric_answer_match(
-        answer,
-        expected_answer,
+    if (
+        normalized_expected
+        in normalized_answer
     ):
         return True
 
-    return False
+    return numeric_answer_match(
+        answer,
+        expected_answer,
+    )
 
 
 def evaluate_case(case: dict) -> dict:
@@ -314,11 +330,19 @@ def evaluate_case(case: dict) -> dict:
         "expected_answer": case.get(
             "expected_answer"
         ),
+        "expected_document": case.get(
+            "expected_document"
+        ),
+        "expected_page": case.get(
+            "expected_page"
+        ),
         "answer_match": None,
         "retrieval_hit": None,
         "top1_hit": None,
         "citation_match": None,
         "abstention_match": None,
+        "passed": False,
+        "sources": sources,
     }
 
     if not answerable:
@@ -326,15 +350,21 @@ def evaluate_case(case: dict) -> dict:
             is_abstention(answer)
         )
 
+        evaluation["passed"] = (
+            evaluation[
+                "abstention_match"
+            ]
+        )
+
         return evaluation
 
-    expected_document = case[
-        "expected_document"
-    ]
+    expected_document = (
+        case["expected_document"]
+    )
 
-    expected_page = case[
-        "expected_page"
-    ]
+    expected_page = (
+        case["expected_page"]
+    )
 
     evaluation["answer_match"] = (
         answer_matches(
@@ -363,9 +393,9 @@ def evaluate_case(case: dict) -> dict:
     else:
         evaluation["top1_hit"] = False
 
-    # Current answer-generation contract requires
-    # the answer itself to identify document/page.
-    normalized_answer = answer.lower()
+    normalized_answer = (
+        answer.lower()
+    )
 
     document_name = (
         expected_document.lower()
@@ -385,6 +415,15 @@ def evaluate_case(case: dict) -> dict:
             pattern in normalized_answer
             for pattern in page_patterns
         )
+    )
+
+    evaluation["passed"] = all(
+        [
+            evaluation["answer_match"],
+            evaluation["retrieval_hit"],
+            evaluation["top1_hit"],
+            evaluation["citation_match"],
+        ]
     )
 
     return evaluation
@@ -425,12 +464,12 @@ def format_rate(
     return f"{rate:.1f}%"
 
 
-def print_category_summary(
+def build_category_metrics(
     results: list[dict],
-) -> None:
+) -> dict:
     """
-    Report performance separately for each
-    benchmark category.
+    Build machine-readable performance metrics
+    for every benchmark category.
     """
 
     grouped = defaultdict(list)
@@ -440,54 +479,276 @@ def print_category_summary(
             result["category"]
         ].append(result)
 
+    category_metrics = {}
+
+    for category in sorted(grouped):
+        category_results = (
+            grouped[category]
+        )
+
+        category_metrics[category] = {
+            "cases": len(
+                category_results
+            ),
+            "passed": sum(
+                result["passed"]
+                for result
+                in category_results
+            ),
+            "pass_rate": calculate_rate(
+                category_results,
+                "passed",
+            ),
+            "answer_accuracy": calculate_rate(
+                category_results,
+                "answer_match",
+            ),
+            "retrieval_hit_rate": calculate_rate(
+                category_results,
+                "retrieval_hit",
+            ),
+            "top1_accuracy": calculate_rate(
+                category_results,
+                "top1_hit",
+            ),
+            "citation_accuracy": calculate_rate(
+                category_results,
+                "citation_match",
+            ),
+            "abstention_accuracy": calculate_rate(
+                category_results,
+                "abstention_match",
+            ),
+        }
+
+    return category_metrics
+
+
+def build_summary(
+    dataset: list[dict],
+    results: list[dict],
+    failures: int,
+) -> dict:
+    """
+    Build overall regression metrics.
+    """
+
+    answerable_count = sum(
+        1
+        for case in dataset
+        if case["answerable"]
+    )
+
+    unanswerable_count = (
+        len(dataset)
+        - answerable_count
+    )
+
+    passed_cases = sum(
+        result["passed"]
+        for result in results
+    )
+
+    failed_cases = (
+        len(results)
+        - passed_cases
+    )
+
+    return {
+        "total_cases": len(dataset),
+        "cases_completed": len(results),
+        "evaluation_failures": failures,
+        "answerable_cases": answerable_count,
+        "unanswerable_cases": (
+            unanswerable_count
+        ),
+        "passed_cases": passed_cases,
+        "failed_cases": failed_cases,
+        "overall_pass_rate": (
+            passed_cases
+            / len(results)
+            * 100
+            if results
+            else 0.0
+        ),
+        "answer_accuracy": calculate_rate(
+            results,
+            "answer_match",
+        ),
+        "retrieval_hit_rate": calculate_rate(
+            results,
+            "retrieval_hit",
+        ),
+        "top1_retrieval_accuracy": (
+            calculate_rate(
+                results,
+                "top1_hit",
+            )
+        ),
+        "citation_accuracy": calculate_rate(
+            results,
+            "citation_match",
+        ),
+        "abstention_accuracy": (
+            calculate_rate(
+                results,
+                "abstention_match",
+            )
+        ),
+    }
+
+
+def save_json_report(
+    summary: dict,
+    category_metrics: dict,
+    results: list[dict],
+) -> None:
+    """
+    Save the complete regression report as JSON.
+    """
+
+    RESULTS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    report = {
+        "generated_at": (
+            datetime.now(
+                timezone.utc
+            ).isoformat()
+        ),
+        "benchmark": (
+            DATASET_PATH.as_posix()
+        ),
+        "numeric_relative_tolerance": (
+            NUMERIC_REL_TOLERANCE
+        ),
+        "summary": summary,
+        "categories": category_metrics,
+        "cases": results,
+    }
+
+    with LATEST_JSON_PATH.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            report,
+            file,
+            indent=2,
+            ensure_ascii=False,
+        )
+
+
+def save_csv_report(
+    results: list[dict],
+) -> None:
+    """
+    Save case-level regression results as CSV.
+    """
+
+    RESULTS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    fieldnames = [
+        "id",
+        "category",
+        "question",
+        "answerable",
+        "expected_answer",
+        "answer",
+        "answer_match",
+        "retrieval_hit",
+        "top1_hit",
+        "citation_match",
+        "abstention_match",
+        "passed",
+    ]
+
+    with LATEST_CSV_PATH.open(
+        "w",
+        encoding="utf-8",
+        newline="",
+    ) as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=fieldnames,
+        )
+
+        writer.writeheader()
+
+        for result in results:
+            writer.writerow(
+                {
+                    field: result.get(
+                        field
+                    )
+                    for field
+                    in fieldnames
+                }
+            )
+
+
+def print_category_summary(
+    category_metrics: dict,
+) -> None:
+    """
+    Print performance for each benchmark category.
+    """
+
     print()
     print("PERFORMANCE BY CATEGORY")
     print("=" * 60)
 
-    for category in sorted(grouped):
-        category_results = grouped[
-            category
-        ]
-
-        answer_rate = calculate_rate(
-            category_results,
-            "answer_match",
-        )
-
-        abstention_rate = calculate_rate(
-            category_results,
-            "abstention_match",
-        )
-
-        retrieval_rate = calculate_rate(
-            category_results,
-            "retrieval_hit",
-        )
-
-        print(
-            f"{category}:"
-        )
+    for category, metrics in (
+        category_metrics.items()
+    ):
+        print(f"{category}:")
         print(
             f"  Cases: "
-            f"{len(category_results)}"
+            f"{metrics['cases']}"
+        )
+        print(
+            f"  Passed: "
+            f"{metrics['passed']}"
+        )
+        print(
+            "  Pass rate: "
+            f"{format_rate(metrics['pass_rate'])}"
         )
 
-        if answer_rate is not None:
+        if (
+            metrics["answer_accuracy"]
+            is not None
+        ):
             print(
                 "  Answer accuracy: "
-                f"{format_rate(answer_rate)}"
+                f"{format_rate(metrics['answer_accuracy'])}"
             )
 
-        if abstention_rate is not None:
-            print(
-                "  Abstention accuracy: "
-                f"{format_rate(abstention_rate)}"
-            )
-
-        if retrieval_rate is not None:
+        if (
+            metrics[
+                "retrieval_hit_rate"
+            ]
+            is not None
+        ):
             print(
                 "  Retrieval hit rate: "
-                f"{format_rate(retrieval_rate)}"
+                f"{format_rate(metrics['retrieval_hit_rate'])}"
+            )
+
+        if (
+            metrics[
+                "abstention_accuracy"
+            ]
+            is not None
+        ):
+            print(
+                "  Abstention accuracy: "
+                f"{format_rate(metrics['abstention_accuracy'])}"
             )
 
         print("-" * 60)
@@ -513,7 +774,8 @@ def main() -> None:
             f"{case.get('category', 'uncategorized')}"
         )
         print(
-            f"Question: {case['question']}"
+            f"Question: "
+            f"{case['question']}"
         )
 
         case_type = (
@@ -527,11 +789,13 @@ def main() -> None:
         )
 
         try:
-            evaluation = evaluate_case(
-                case
+            evaluation = (
+                evaluate_case(case)
             )
 
-            results.append(evaluation)
+            results.append(
+                evaluation
+            )
 
             print(
                 f"Answer: "
@@ -569,6 +833,11 @@ def main() -> None:
                     f"{evaluation['abstention_match']}"
                 )
 
+            print(
+                f"Case passed: "
+                f"{evaluation['passed']}"
+            )
+
         except Exception as error:
             failures += 1
 
@@ -579,68 +848,101 @@ def main() -> None:
 
         print("-" * 60)
 
-    answerable_count = sum(
-        1
-        for case in dataset
-        if case["answerable"]
+    summary = build_summary(
+        dataset,
+        results,
+        failures,
     )
 
-    unanswerable_count = (
-        len(dataset)
-        - answerable_count
+    category_metrics = (
+        build_category_metrics(
+            results
+        )
+    )
+
+    save_json_report(
+        summary,
+        category_metrics,
+        results,
+    )
+
+    save_csv_report(
+        results
     )
 
     print()
     print("EQUITYAI RAG EVALUATION")
     print("=" * 60)
+
     print(
         f"Cases completed: "
-        f"{len(results)}/{len(dataset)}"
+        f"{summary['cases_completed']}/"
+        f"{summary['total_cases']}"
     )
+
     print(
         f"Evaluation failures: "
-        f"{failures}"
+        f"{summary['evaluation_failures']}"
     )
+
     print(
-        f"Answerable cases: "
-        f"{answerable_count}"
+        f"Passed cases: "
+        f"{summary['passed_cases']}"
     )
+
     print(
-        f"Unanswerable cases: "
-        f"{unanswerable_count}"
+        f"Failed cases: "
+        f"{summary['failed_cases']}"
     )
+
+    print(
+        "Overall pass rate: "
+        f"{format_rate(summary['overall_pass_rate'])}"
+    )
+
     print("-" * 60)
 
     print(
         "Answer accuracy: "
-        f"{format_rate(calculate_rate(results, 'answer_match'))}"
+        f"{format_rate(summary['answer_accuracy'])}"
     )
 
     print(
         "Retrieval hit rate: "
-        f"{format_rate(calculate_rate(results, 'retrieval_hit'))}"
+        f"{format_rate(summary['retrieval_hit_rate'])}"
     )
 
     print(
         "Top-1 retrieval accuracy: "
-        f"{format_rate(calculate_rate(results, 'top1_hit'))}"
+        f"{format_rate(summary['top1_retrieval_accuracy'])}"
     )
 
     print(
         "Citation accuracy: "
-        f"{format_rate(calculate_rate(results, 'citation_match'))}"
+        f"{format_rate(summary['citation_accuracy'])}"
     )
 
     print(
         "Abstention accuracy: "
-        f"{format_rate(calculate_rate(results, 'abstention_match'))}"
+        f"{format_rate(summary['abstention_accuracy'])}"
     )
 
     print("=" * 60)
 
     print_category_summary(
-        results
+        category_metrics
     )
+
+    print()
+    print("REGRESSION REPORTS")
+    print("=" * 60)
+    print(
+        f"JSON: {LATEST_JSON_PATH}"
+    )
+    print(
+        f"CSV:  {LATEST_CSV_PATH}"
+    )
+    print("=" * 60)
 
 
 if __name__ == "__main__":

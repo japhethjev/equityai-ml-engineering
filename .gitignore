@@ -219,3 +219,5 @@ __marimo__/
 .env
 # Local RAG documents
 /data/*.pdf
+# Generated RAG evaluation reports
+evaluation/results/

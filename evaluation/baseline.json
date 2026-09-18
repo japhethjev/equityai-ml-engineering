@@ -1,0 +1,1164 @@
+{
+  "generated_at": "2026-09-18T09:45:15.540578+00:00",
+  "benchmark": "evaluation/rag_eval_dataset.json",
+  "numeric_relative_tolerance": 0.005,
+  "summary": {
+    "total_cases": 30,
+    "cases_completed": 30,
+    "evaluation_failures": 0,
+    "answerable_cases": 22,
+    "unanswerable_cases": 8,
+    "passed_cases": 30,
+    "failed_cases": 0,
+    "overall_pass_rate": 100.0,
+    "answer_accuracy": 100.0,
+    "retrieval_hit_rate": 100.0,
+    "top1_retrieval_accuracy": 100.0,
+    "citation_accuracy": 100.0,
+    "abstention_accuracy": 100.0
+  },
+  "categories": {
+    "abstention": {
+      "cases": 4,
+      "passed": 4,
+      "pass_rate": 100.0,
+      "answer_accuracy": null,
+      "retrieval_hit_rate": null,
+      "top1_accuracy": null,
+      "citation_accuracy": null,
+      "abstention_accuracy": 100.0
+    },
+    "direct_factual": {
+      "cases": 10,
+      "passed": 10,
+      "pass_rate": 100.0,
+      "answer_accuracy": 100.0,
+      "retrieval_hit_rate": 100.0,
+      "top1_accuracy": 100.0,
+      "citation_accuracy": 100.0,
+      "abstention_accuracy": null
+    },
+    "metric_distinction": {
+      "cases": 4,
+      "passed": 4,
+      "pass_rate": 100.0,
+      "answer_accuracy": 100.0,
+      "retrieval_hit_rate": 100.0,
+      "top1_accuracy": 100.0,
+      "citation_accuracy": 100.0,
+      "abstention_accuracy": null
+    },
+    "paraphrase": {
+      "cases": 3,
+      "passed": 3,
+      "pass_rate": 100.0,
+      "answer_accuracy": 100.0,
+      "retrieval_hit_rate": 100.0,
+      "top1_accuracy": 100.0,
+      "citation_accuracy": 100.0,
+      "abstention_accuracy": null
+    },
+    "semantic_trap": {
+      "cases": 4,
+      "passed": 4,
+      "pass_rate": 100.0,
+      "answer_accuracy": null,
+      "retrieval_hit_rate": null,
+      "top1_accuracy": null,
+      "citation_accuracy": null,
+      "abstention_accuracy": 100.0
+    },
+    "temporal": {
+      "cases": 5,
+      "passed": 5,
+      "pass_rate": 100.0,
+      "answer_accuracy": 100.0,
+      "retrieval_hit_rate": 100.0,
+      "top1_accuracy": 100.0,
+      "citation_accuracy": 100.0,
+      "abstention_accuracy": null
+    }
+  },
+  "cases": [
+    {
+      "id": "dangote_001",
+      "category": "direct_factual",
+      "question": "What is the IPO offer price?",
+      "answerable": true,
+      "answer": "The IPO offer price is ₦525.00 (dangote_refinery_valuation.pdf, page 1).",
+      "expected_answer": "₦525.00",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.5253770448401609
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.49970929222543464
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.49560133331722594
+        }
+      ]
+    },
+    {
+      "id": "dangote_002",
+      "category": "direct_factual",
+      "question": "How many shares are being offered?",
+      "answerable": true,
+      "answer": "4.10 billion shares are being offered (dangote_refinery_valuation.pdf, Page 1).",
+      "expected_answer": "4.10 billion shares",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.33843149757632857
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.3301385978094497
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.254363585302172
+        }
+      ]
+    },
+    {
+      "id": "dangote_003",
+      "category": "direct_factual",
+      "question": "What are the gross proceeds from the offer?",
+      "answerable": true,
+      "answer": "Gross proceeds: ₦2.15tn (dangote_refinery_valuation.pdf, page 1).",
+      "expected_answer": "₦2.15 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.5256116467949112
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.5127837829661659
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.3735675579535124
+        }
+      ]
+    },
+    {
+      "id": "dangote_004",
+      "category": "direct_factual",
+      "question": "What are the net proceeds from the offer?",
+      "answerable": true,
+      "answer": "Net proceeds: ₦2.11tn (dangote_refinery_valuation.pdf, page 1).",
+      "expected_answer": "₦2.11 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.5448330665123828
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.523906248161093
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.34743733378521535
+        }
+      ]
+    },
+    {
+      "id": "dangote_005",
+      "category": "paraphrase",
+      "question": "At what price are investors being offered each share?",
+      "answerable": true,
+      "answer": "Investors are being offered each share at ₦525.00 (dangote_refinery_valuation.pdf, Page 1).",
+      "expected_answer": "₦525.00",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.3701820387105278
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.33369564085653364
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.2856443490799931
+        }
+      ]
+    },
+    {
+      "id": "dangote_006",
+      "category": "paraphrase",
+      "question": "Approximately how much money will the company raise before offer expenses?",
+      "answerable": true,
+      "answer": "Approximately ₦2.15 trillion (dangote_refinery_valuation.pdf, page 1).",
+      "expected_answer": "₦2.15 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.3008774870345243
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.2986021235898037
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.2851574250012237
+        }
+      ]
+    },
+    {
+      "id": "dangote_007",
+      "category": "paraphrase",
+      "question": "Approximately how much will remain from the offer after expenses?",
+      "answerable": true,
+      "answer": "Approximately ₦2.11tn will remain from the offer after expenses (dangote_refinery_valuation.pdf, p.1).",
+      "expected_answer": "₦2.11 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.3479071737132303
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.32618412791610596
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.32191328620443316
+        }
+      ]
+    },
+    {
+      "id": "dangote_008",
+      "category": "direct_factual",
+      "question": "What entity is associated with the refinery offering?",
+      "answerable": true,
+      "answer": "The issuer is Dangote Petroleum Refinery FZE (dangote_refinery_valuation.pdf, Page 1).",
+      "expected_answer": "Dangote Petroleum Refinery FZE",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.4185142538712512
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.41361032887765636
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 2,
+          "chunk": 2,
+          "score": 0.36685691910036616
+        }
+      ]
+    },
+    {
+      "id": "dangote_009",
+      "category": "abstention",
+      "question": "What dividend per share was declared?",
+      "answerable": false,
+      "answer": "I could not find sufficient evidence in the provided documents.",
+      "expected_answer": null,
+      "expected_document": null,
+      "expected_page": null,
+      "answer_match": null,
+      "retrieval_hit": null,
+      "top1_hit": null,
+      "citation_match": null,
+      "abstention_match": true,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.27016563649599173
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.20117667978304574
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.18496026743036229
+        }
+      ]
+    },
+    {
+      "id": "dangote_010",
+      "category": "abstention",
+      "question": "Who is the external auditor of the refinery?",
+      "answerable": false,
+      "answer": "I could not find sufficient evidence in the provided documents.",
+      "expected_answer": null,
+      "expected_document": null,
+      "expected_page": null,
+      "answer_match": null,
+      "retrieval_hit": null,
+      "top1_hit": null,
+      "citation_match": null,
+      "abstention_match": true,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.37829681908829077
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 2,
+          "chunk": 2,
+          "score": 0.3671916819595681
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.33222753025965646
+        }
+      ]
+    },
+    {
+      "id": "dangote_011",
+      "category": "temporal",
+      "question": "What was the refinery's 2025 profit after tax?",
+      "answerable": true,
+      "answer": "The refinery's 2025 profit after tax was a loss of ₦723 billion. (dangote_refinery_valuation.pdf, page 1)",
+      "expected_answer": "₦723 billion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.5252329981883976
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.4707069338727806
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.3960616031510189
+        }
+      ]
+    },
+    {
+      "id": "dangote_012",
+      "category": "semantic_trap",
+      "question": "What is the company's current stock market price?",
+      "answerable": false,
+      "answer": "I could not find sufficient evidence in the provided documents.",
+      "expected_answer": null,
+      "expected_document": null,
+      "expected_page": null,
+      "answer_match": null,
+      "retrieval_hit": null,
+      "top1_hit": null,
+      "citation_match": null,
+      "abstention_match": true,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.3479507306220011
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.31567304989163325
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.30907370423915953
+        }
+      ]
+    },
+    {
+      "id": "dangote_013",
+      "category": "temporal",
+      "question": "What was the refinery's profit after tax in 2024?",
+      "answerable": true,
+      "answer": "The refinery reported a profit after tax of (₦2,233) billion — i.e., a loss of ₦2.233 trillion in 2024 (dangote_refinery_valuation.pdf, page 1).",
+      "expected_answer": "₦2.233 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.5290050537273304
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.4745214180861462
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.37202522272013683
+        }
+      ]
+    },
+    {
+      "id": "dangote_014",
+      "category": "temporal",
+      "question": "What was the refinery's profit after tax in H1 2026?",
+      "answerable": true,
+      "answer": "The refinery's profit after tax in H1 2026 was ₦2,504 billion (₦2.50tn). Source: dangote_refinery_valuation.pdf, page 1.",
+      "expected_answer": "₦2.504 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.550015059748281
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.4828886413949073
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.4279409288638552
+        }
+      ]
+    },
+    {
+      "id": "dangote_015",
+      "category": "temporal",
+      "question": "What was the refinery's revenue in 2025?",
+      "answerable": true,
+      "answer": "₦18,738 billion (2025 revenue). Source: dangote_refinery_valuation.pdf, page 1.",
+      "expected_answer": "₦18.738 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.4946929309670241
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.48748528723902107
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.4140087555327983
+        }
+      ]
+    },
+    {
+      "id": "dangote_016",
+      "category": "temporal",
+      "question": "What revenue did the refinery report for H1 2026?",
+      "answerable": true,
+      "answer": "H1 2026 revenue was ₦19.13 trillion (dangote_refinery_valuation.pdf, page 1).",
+      "expected_answer": "₦19.135 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.5091947677693475
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.469714354534854
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.4523925205036732
+        }
+      ]
+    },
+    {
+      "id": "dangote_017",
+      "category": "metric_distinction",
+      "question": "What was the refinery's gross profit in 2025?",
+      "answerable": true,
+      "answer": "The refinery's gross profit in 2025 was ₦348 billion (dangote_refinery_valuation.pdf, Page 1).",
+      "expected_answer": "₦348 billion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.5139930386920759
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.49380176194253067
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.41505810913118435
+        }
+      ]
+    },
+    {
+      "id": "dangote_018",
+      "category": "metric_distinction",
+      "question": "What was the refinery's operating profit in 2025?",
+      "answerable": true,
+      "answer": "The refinery's operating profit in 2025 was ₦223 billion. (dangote_refinery_valuation.pdf, page 1)",
+      "expected_answer": "₦223 billion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.5088016306740621
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.4628935921267162
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.4132485356705339
+        }
+      ]
+    },
+    {
+      "id": "dangote_019",
+      "category": "metric_distinction",
+      "question": "What was gross profit in H1 2026?",
+      "answerable": true,
+      "answer": "Gross profit in H1 2026 was ₦3,433 billion (₦3.433 trillion), according to dangote_refinery_valuation.pdf, page 1.",
+      "expected_answer": "₦3.433 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.4861487356651025
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.4036049620513816
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.3486211319219047
+        }
+      ]
+    },
+    {
+      "id": "dangote_020",
+      "category": "metric_distinction",
+      "question": "What was operating profit in H1 2026?",
+      "answerable": true,
+      "answer": "Operating profit in H1 2026 was ₦3,254 billion.  \nSource: dangote_refinery_valuation.pdf, page 1.",
+      "expected_answer": "₦3.254 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.4926864219647842
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.37841808689204814
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 2,
+          "chunk": 4,
+          "score": 0.3770659725501492
+        }
+      ]
+    },
+    {
+      "id": "dangote_021",
+      "category": "direct_factual",
+      "question": "What gross margin did the refinery achieve in H1 2026?",
+      "answerable": true,
+      "answer": "H1 2026 gross margin: 17.9% (dangote_refinery_valuation.pdf, Page 1).",
+      "expected_answer": "17.9%",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.5168230773654477
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.4516917193079059
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.45140676905667276
+        }
+      ]
+    },
+    {
+      "id": "dangote_022",
+      "category": "direct_factual",
+      "question": "How much H1 2026 revenue came from PMS petrol?",
+      "answerable": true,
+      "answer": "H1 2026 revenue from PMS (Petrol) was ₦8.13tn (dangote_refinery_valuation.pdf, p.1).",
+      "expected_answer": "₦8.13 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.4462900513491813
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.41832682466686166
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.3626572347927657
+        }
+      ]
+    },
+    {
+      "id": "dangote_023",
+      "category": "direct_factual",
+      "question": "How much H1 2026 revenue came from AGO diesel?",
+      "answerable": true,
+      "answer": "₦4.81tn — dangote_refinery_valuation.pdf, Page 1.",
+      "expected_answer": "₦4.81 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.4225355699255757
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.3663058435944909
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.349631719011344
+        }
+      ]
+    },
+    {
+      "id": "dangote_024",
+      "category": "direct_factual",
+      "question": "How much H1 2026 revenue came from jet fuel?",
+      "answerable": true,
+      "answer": "H1 2026 jet fuel revenue was ₦4.54tn (dangote_refinery_valuation.pdf, page 1).",
+      "expected_answer": "₦4.54 trillion",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.4263836604978172
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.402568256868715
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 2,
+          "chunk": 4,
+          "score": 0.35491062365799975
+        }
+      ]
+    },
+    {
+      "id": "dangote_025",
+      "category": "direct_factual",
+      "question": "What percentage of the offer represents offer costs?",
+      "answerable": true,
+      "answer": "Offer costs are 1.93% (dangote_refinery_valuation.pdf, page 1).",
+      "expected_answer": "1.93%",
+      "expected_document": "dangote_refinery_valuation.pdf",
+      "expected_page": 1,
+      "answer_match": true,
+      "retrieval_hit": true,
+      "top1_hit": true,
+      "citation_match": true,
+      "abstention_match": null,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.38966667375306596
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.3505515225886454
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 2,
+          "chunk": 4,
+          "score": 0.3262986856492518
+        }
+      ]
+    },
+    {
+      "id": "dangote_026",
+      "category": "semantic_trap",
+      "question": "What dividend per share does the approximately ₦40 EPS imply?",
+      "answerable": false,
+      "answer": "I could not find sufficient evidence in the provided documents.",
+      "expected_answer": null,
+      "expected_document": null,
+      "expected_page": null,
+      "answer_match": null,
+      "retrieval_hit": null,
+      "top1_hit": null,
+      "citation_match": null,
+      "abstention_match": true,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.36961745141821867
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.279670138513174
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.2592327810100975
+        }
+      ]
+    },
+    {
+      "id": "dangote_027",
+      "category": "semantic_trap",
+      "question": "What was the refinery's full-year 2026 profit after tax?",
+      "answerable": false,
+      "answer": "I could not find sufficient evidence in the provided documents.",
+      "expected_answer": null,
+      "expected_document": null,
+      "expected_page": null,
+      "answer_match": null,
+      "retrieval_hit": null,
+      "top1_hit": null,
+      "citation_match": null,
+      "abstention_match": true,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.5387423536255784
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.4267917531963683
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.41107932126461355
+        }
+      ]
+    },
+    {
+      "id": "dangote_028",
+      "category": "semantic_trap",
+      "question": "What was the refinery's 2025 operating profit margin?",
+      "answerable": false,
+      "answer": "I could not find sufficient evidence in the provided documents.",
+      "expected_answer": null,
+      "expected_document": null,
+      "expected_page": null,
+      "answer_match": null,
+      "retrieval_hit": null,
+      "top1_hit": null,
+      "citation_match": null,
+      "abstention_match": true,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.49487533336231404
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.43502529228330344
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.41439865011154886
+        }
+      ]
+    },
+    {
+      "id": "dangote_029",
+      "category": "abstention",
+      "question": "What was the refinery's total debt at the end of 2025?",
+      "answerable": false,
+      "answer": "I could not find sufficient evidence in the provided documents.",
+      "expected_answer": null,
+      "expected_document": null,
+      "expected_page": null,
+      "answer_match": null,
+      "retrieval_hit": null,
+      "top1_hit": null,
+      "citation_match": null,
+      "abstention_match": true,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.43435191179415233
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 1,
+          "score": 0.41110450480113925
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 4,
+          "score": 0.3854923769669434
+        }
+      ]
+    },
+    {
+      "id": "dangote_030",
+      "category": "abstention",
+      "question": "What dividend yield does the company currently offer investors?",
+      "answerable": false,
+      "answer": "I could not find sufficient evidence in the provided documents.",
+      "expected_answer": null,
+      "expected_document": null,
+      "expected_page": null,
+      "answer_match": null,
+      "retrieval_hit": null,
+      "top1_hit": null,
+      "citation_match": null,
+      "abstention_match": true,
+      "passed": true,
+      "sources": [
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 2,
+          "chunk": 4,
+          "score": 0.29409445722294564
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 2,
+          "score": 0.29200701874933244
+        },
+        {
+          "document": "dangote_refinery_valuation.pdf",
+          "page": 1,
+          "chunk": 3,
+          "score": 0.26394796530833764
+        }
+      ]
+    }
+  ]
+}
