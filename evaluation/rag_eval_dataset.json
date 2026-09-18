@@ -1,6 +1,7 @@
 [
   {
     "id": "dangote_001",
+    "category": "direct_factual",
     "question": "What is the IPO offer price?",
     "expected_answer": "₦525.00",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -9,6 +10,7 @@
   },
   {
     "id": "dangote_002",
+    "category": "direct_factual",
     "question": "How many shares are being offered?",
     "expected_answer": "4.10 billion shares",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -17,6 +19,7 @@
   },
   {
     "id": "dangote_003",
+    "category": "direct_factual",
     "question": "What are the gross proceeds from the offer?",
     "expected_answer": "₦2.15 trillion",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -25,6 +28,7 @@
   },
   {
     "id": "dangote_004",
+    "category": "direct_factual",
     "question": "What are the net proceeds from the offer?",
     "expected_answer": "₦2.11 trillion",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -33,6 +37,7 @@
   },
   {
     "id": "dangote_005",
+    "category": "paraphrase",
     "question": "At what price are investors being offered each share?",
     "expected_answer": "₦525.00",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -41,6 +46,7 @@
   },
   {
     "id": "dangote_006",
+    "category": "paraphrase",
     "question": "Approximately how much money will the company raise before offer expenses?",
     "expected_answer": "₦2.15 trillion",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -49,6 +55,7 @@
   },
   {
     "id": "dangote_007",
+    "category": "paraphrase",
     "question": "Approximately how much will remain from the offer after expenses?",
     "expected_answer": "₦2.11 trillion",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -57,6 +64,7 @@
   },
   {
     "id": "dangote_008",
+    "category": "direct_factual",
     "question": "What entity is associated with the refinery offering?",
     "expected_answer": "Dangote Petroleum Refinery FZE",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -65,6 +73,7 @@
   },
   {
     "id": "dangote_009",
+    "category": "abstention",
     "question": "What dividend per share was declared?",
     "expected_answer": null,
     "expected_document": null,
@@ -73,6 +82,7 @@
   },
   {
     "id": "dangote_010",
+    "category": "abstention",
     "question": "Who is the external auditor of the refinery?",
     "expected_answer": null,
     "expected_document": null,
@@ -81,6 +91,7 @@
   },
   {
     "id": "dangote_011",
+    "category": "temporal",
     "question": "What was the refinery's 2025 profit after tax?",
     "expected_answer": "₦723 billion",
     "expected_document": "dangote_refinery_valuation.pdf",
@@ -89,7 +100,170 @@
   },
   {
     "id": "dangote_012",
+    "category": "semantic_trap",
     "question": "What is the company's current stock market price?",
+    "expected_answer": null,
+    "expected_document": null,
+    "expected_page": null,
+    "answerable": false
+  },
+  {
+    "id": "dangote_013",
+    "category": "temporal",
+    "question": "What was the refinery's profit after tax in 2024?",
+    "expected_answer": "₦2.233 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_014",
+    "category": "temporal",
+    "question": "What was the refinery's profit after tax in H1 2026?",
+    "expected_answer": "₦2.504 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_015",
+    "category": "temporal",
+    "question": "What was the refinery's revenue in 2025?",
+    "expected_answer": "₦18.738 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_016",
+    "category": "temporal",
+    "question": "What revenue did the refinery report for H1 2026?",
+    "expected_answer": "₦19.135 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_017",
+    "category": "metric_distinction",
+    "question": "What was the refinery's gross profit in 2025?",
+    "expected_answer": "₦348 billion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_018",
+    "category": "metric_distinction",
+    "question": "What was the refinery's operating profit in 2025?",
+    "expected_answer": "₦223 billion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_019",
+    "category": "metric_distinction",
+    "question": "What was gross profit in H1 2026?",
+    "expected_answer": "₦3.433 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_020",
+    "category": "metric_distinction",
+    "question": "What was operating profit in H1 2026?",
+    "expected_answer": "₦3.254 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_021",
+    "category": "direct_factual",
+    "question": "What gross margin did the refinery achieve in H1 2026?",
+    "expected_answer": "17.9%",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_022",
+    "category": "direct_factual",
+    "question": "How much H1 2026 revenue came from PMS petrol?",
+    "expected_answer": "₦8.13 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_023",
+    "category": "direct_factual",
+    "question": "How much H1 2026 revenue came from AGO diesel?",
+    "expected_answer": "₦4.81 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_024",
+    "category": "direct_factual",
+    "question": "How much H1 2026 revenue came from jet fuel?",
+    "expected_answer": "₦4.54 trillion",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_025",
+    "category": "direct_factual",
+    "question": "What percentage of the offer represents offer costs?",
+    "expected_answer": "1.93%",
+    "expected_document": "dangote_refinery_valuation.pdf",
+    "expected_page": 1,
+    "answerable": true
+  },
+  {
+    "id": "dangote_026",
+    "category": "semantic_trap",
+    "question": "What dividend per share does the approximately ₦40 EPS imply?",
+    "expected_answer": null,
+    "expected_document": null,
+    "expected_page": null,
+    "answerable": false
+  },
+  {
+    "id": "dangote_027",
+    "category": "semantic_trap",
+    "question": "What was the refinery's full-year 2026 profit after tax?",
+    "expected_answer": null,
+    "expected_document": null,
+    "expected_page": null,
+    "answerable": false
+  },
+  {
+    "id": "dangote_028",
+    "category": "semantic_trap",
+    "question": "What was the refinery's 2025 operating profit margin?",
+    "expected_answer": null,
+    "expected_document": null,
+    "expected_page": null,
+    "answerable": false
+  },
+  {
+    "id": "dangote_029",
+    "category": "abstention",
+    "question": "What was the refinery's total debt at the end of 2025?",
+    "expected_answer": null,
+    "expected_document": null,
+    "expected_page": null,
+    "answerable": false
+  },
+  {
+    "id": "dangote_030",
+    "category": "abstention",
+    "question": "What dividend yield does the company currently offer investors?",
     "expected_answer": null,
     "expected_document": null,
     "expected_page": null,

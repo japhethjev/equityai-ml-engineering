@@ -1,25 +1,24 @@
 import json
 import re
+from collections import defaultdict
 from pathlib import Path
 
 from app.rag.rag_service import answer_question
 
 
-DATASET_PATH = Path(
-    "evaluation/rag_eval_dataset.json"
-)
+DATASET_PATH = Path("evaluation/rag_eval_dataset.json")
 
 ABSTENTION_TEXT = (
     "I could not find sufficient evidence "
     "in the provided documents."
 )
 
+# Relative tolerance for approximate financial answers.
+# 0.5% allows reasonable display rounding while remaining strict.
+NUMERIC_REL_TOLERANCE = 0.005
+
 
 def load_dataset() -> list[dict]:
-    """
-    Load the RAG evaluation benchmark.
-    """
-
     with DATASET_PATH.open(
         "r",
         encoding="utf-8",
@@ -27,466 +26,621 @@ def load_dataset() -> list[dict]:
         return json.load(file)
 
 
-def normalize_financial_text(
-    text: str,
-) -> str:
+def normalize_financial_text(text: str | None) -> str:
     """
-    Normalize common financial notation so that
-    semantically equivalent financial answers
-    can be compared consistently.
-
-    Examples:
-    ₦2.15tn -> ₦2.15 trillion
-    4.10bn -> 4.10 billion
-    NGN 525 -> ₦525
+    Normalize common financial notation for textual comparison.
     """
 
-    normalized = text.lower().strip()
+    if text is None:
+        return ""
 
-    # Normalize currency representation.
-    normalized = normalized.replace(
-        "ngn",
-        "₦",
+    text = text.lower().strip()
+
+    text = text.replace("ngn", "₦")
+
+    text = re.sub(
+        r"\btn\b",
+        "trillion",
+        text,
+    )
+    text = re.sub(
+        r"\bbn\b",
+        "billion",
+        text,
+    )
+    text = re.sub(
+        r"\bmn\b",
+        "million",
+        text,
     )
 
-    # Remove unnecessary space between
-    # naira symbol and number.
-    normalized = re.sub(
-        r"₦\s+(?=\d)",
-        "₦",
-        normalized,
-    )
-
-    # Normalize trillion abbreviations.
-    normalized = re.sub(
-        r"(?<=\d)\s*tn\b",
-        " trillion",
-        normalized,
-    )
-
-    # Normalize billion abbreviations.
-    normalized = re.sub(
-        r"(?<=\d)\s*bn\b",
-        " billion",
-        normalized,
-    )
-
-    # Normalize million abbreviations.
-    normalized = re.sub(
-        r"(?<=\d)\s*mn\b",
-        " million",
-        normalized,
-    )
-
-    # Normalize whitespace.
-    normalized = re.sub(
+    text = re.sub(
         r"\s+",
         " ",
-        normalized,
+        text,
     )
 
-    return normalized
+    return text
 
 
-def is_abstention(
-    answer: str,
+def is_abstention(answer: str) -> bool:
+    """
+    Determine whether the model correctly abstained.
+    """
+
+    return (
+        ABSTENTION_TEXT.lower()
+        in answer.lower().strip()
+    )
+
+
+def unit_multiplier(unit: str | None) -> float:
+    """
+    Convert financial magnitude words into a common scale.
+    """
+
+    if not unit:
+        return 1.0
+
+    unit = unit.lower()
+
+    multipliers = {
+        "trillion": 1_000_000_000_000,
+        "tn": 1_000_000_000_000,
+        "billion": 1_000_000_000,
+        "bn": 1_000_000_000,
+        "million": 1_000_000,
+        "mn": 1_000_000,
+    }
+
+    return multipliers.get(unit, 1.0)
+
+
+def extract_financial_values(text: str | None) -> list[float]:
+    """
+    Extract currency-denominated financial values and convert
+    them to a common base-unit representation.
+
+    Examples:
+        ₦3,433 billion -> 3.433e12
+        ₦3.433 trillion -> 3.433e12
+        ₦2.50tn -> 2.50e12
+    """
+
+    if not text:
+        return []
+
+    pattern = re.compile(
+        r"(?:₦|ngn)\s*"
+        r"\(?\s*"
+        r"([\d,]+(?:\.\d+)?)"
+        r"\s*\)?"
+        r"\s*"
+        r"(trillion|billion|million|tn|bn|mn)?",
+        re.IGNORECASE,
+    )
+
+    values = []
+
+    for match in pattern.finditer(text):
+        number_text = (
+            match.group(1)
+            .replace(",", "")
+        )
+
+        try:
+            number = float(number_text)
+        except ValueError:
+            continue
+
+        multiplier = unit_multiplier(
+            match.group(2)
+        )
+
+        values.append(
+            number * multiplier
+        )
+
+    return values
+
+
+def extract_percentages(text: str | None) -> list[float]:
+    """
+    Extract percentage values from text.
+    """
+
+    if not text:
+        return []
+
+    pattern = re.compile(
+        r"(\d+(?:\.\d+)?)\s*%"
+    )
+
+    return [
+        float(match.group(1))
+        for match in pattern.finditer(text)
+    ]
+
+
+def values_close(
+    actual: float,
+    expected: float,
 ) -> bool:
     """
-    Determine whether the RAG system correctly
-    declined to answer because sufficient
-    evidence was unavailable.
+    Compare numerical values using a controlled
+    relative tolerance.
     """
 
-    normalized_answer = (
-        answer.lower().strip()
+    if actual == expected:
+        return True
+
+    denominator = max(
+        abs(expected),
+        1.0,
     )
 
-    normalized_abstention = (
-        ABSTENTION_TEXT.lower()
+    relative_error = (
+        abs(actual - expected)
+        / denominator
     )
 
     return (
-        normalized_abstention
-        in normalized_answer
+        relative_error
+        <= NUMERIC_REL_TOLERANCE
     )
+
+
+def numeric_answer_match(
+    answer: str,
+    expected_answer: str,
+) -> bool:
+    """
+    Compare financial numbers after converting units.
+
+    This allows economically equivalent representations such as:
+
+        ₦3,433 billion
+        ₦3.433 trillion
+
+    and reasonable rounding such as:
+
+        ₦2.50 trillion
+        ₦2.504 trillion
+    """
+
+    expected_values = extract_financial_values(
+        expected_answer
+    )
+
+    actual_values = extract_financial_values(
+        answer
+    )
+
+    if expected_values:
+        for expected in expected_values:
+            for actual in actual_values:
+                if values_close(
+                    actual,
+                    expected,
+                ):
+                    return True
+
+    expected_percentages = extract_percentages(
+        expected_answer
+    )
+
+    actual_percentages = extract_percentages(
+        answer
+    )
+
+    if expected_percentages:
+        for expected in expected_percentages:
+            for actual in actual_percentages:
+                if values_close(
+                    actual,
+                    expected,
+                ):
+                    return True
+
+    return False
+
+
+def answer_matches(
+    answer: str,
+    expected_answer: str | None,
+) -> bool:
+    """
+    Evaluate an answer using both normalized text
+    and numerical financial equivalence.
+    """
+
+    if expected_answer is None:
+        return False
+
+    normalized_answer = (
+        normalize_financial_text(answer)
+    )
+
+    normalized_expected = (
+        normalize_financial_text(
+            expected_answer
+        )
+    )
+
+    # First use the existing textual comparison.
+    if normalized_expected in normalized_answer:
+        return True
+
+    # Then check numerical equivalence.
+    if numeric_answer_match(
+        answer,
+        expected_answer,
+    ):
+        return True
+
+    return False
 
 
 def evaluate_case(case: dict) -> dict:
     """
-    Run one evaluation question through the
-    production RAG pipeline.
-
-    Answerable and unanswerable questions are
-    evaluated differently.
+    Run and score one RAG evaluation case.
     """
 
     result = answer_question(
         case["question"]
     )
 
-    answer = result["answer"]
-    sources = result["sources"]
+    answer = result.get(
+        "answer",
+        "",
+    )
+
+    sources = result.get(
+        "sources",
+        [],
+    )
 
     answerable = case["answerable"]
 
-    # -----------------------------------------
-    # Unanswerable question
-    # -----------------------------------------
+    evaluation = {
+        "id": case["id"],
+        "category": case.get(
+            "category",
+            "uncategorized",
+        ),
+        "question": case["question"],
+        "answerable": answerable,
+        "answer": answer,
+        "expected_answer": case.get(
+            "expected_answer"
+        ),
+        "answer_match": None,
+        "retrieval_hit": None,
+        "top1_hit": None,
+        "citation_match": None,
+        "abstention_match": None,
+    }
 
     if not answerable:
-
-        abstention_match = is_abstention(
-            answer
+        evaluation["abstention_match"] = (
+            is_abstention(answer)
         )
 
-        return {
-            "id": case["id"],
-            "question": case["question"],
-            "answerable": False,
-            "answer": answer,
-            "answer_match": None,
-            "retrieval_hit": None,
-            "top1_hit": None,
-            "citation_match": None,
-            "abstention_match": (
-                abstention_match
-            ),
-            "sources": sources,
-        }
+        return evaluation
 
-    # -----------------------------------------
-    # Answerable question
-    # -----------------------------------------
+    expected_document = case[
+        "expected_document"
+    ]
 
-    normalized_expected = (
-        normalize_financial_text(
-            case["expected_answer"]
+    expected_page = case[
+        "expected_page"
+    ]
+
+    evaluation["answer_match"] = (
+        answer_matches(
+            answer,
+            case["expected_answer"],
         )
     )
 
-    normalized_answer = (
-        normalize_financial_text(
-            answer
-        )
-    )
-
-    # -----------------------------------------
-    # Answer accuracy
-    # -----------------------------------------
-
-    answer_match = (
-        normalized_expected
-        in normalized_answer
-    )
-
-    # -----------------------------------------
-    # Retrieval hit
-    #
-    # Correct document + page appears anywhere
-    # in the returned sources.
-    # -----------------------------------------
-
-    retrieval_hit = any(
-        source["document"]
-        == case["expected_document"]
-        and source["page"]
-        == case["expected_page"]
+    evaluation["retrieval_hit"] = any(
+        source.get("document")
+        == expected_document
+        and source.get("page")
+        == expected_page
         for source in sources
     )
 
-    # -----------------------------------------
-    # Top-1 retrieval accuracy
-    # -----------------------------------------
-
-    top1_hit = False
-
     if sources:
-
         top_source = sources[0]
 
-        top1_hit = (
-            top_source["document"]
-            == case["expected_document"]
-            and top_source["page"]
-            == case["expected_page"]
+        evaluation["top1_hit"] = (
+            top_source.get("document")
+            == expected_document
+            and top_source.get("page")
+            == expected_page
         )
+    else:
+        evaluation["top1_hit"] = False
 
-    # -----------------------------------------
-    # Citation accuracy
-    # -----------------------------------------
+    # Current answer-generation contract requires
+    # the answer itself to identify document/page.
+    normalized_answer = answer.lower()
 
-    citation_match = (
-        case["expected_document"]
-        in answer
+    document_name = (
+        expected_document.lower()
     )
 
-    return {
-        "id": case["id"],
-        "question": case["question"],
-        "answerable": True,
-        "answer": answer,
-        "expected_answer": case[
-            "expected_answer"
-        ],
-        "normalized_answer": (
-            normalized_answer
-        ),
-        "normalized_expected": (
-            normalized_expected
-        ),
-        "answer_match": answer_match,
-        "retrieval_hit": retrieval_hit,
-        "top1_hit": top1_hit,
-        "citation_match": citation_match,
-        "abstention_match": None,
-        "sources": sources,
-    }
+    page_patterns = [
+        f"page {expected_page}",
+        f"page: {expected_page}",
+        f"p.{expected_page}",
+        f"p. {expected_page}",
+    ]
+
+    evaluation["citation_match"] = (
+        document_name
+        in normalized_answer
+        and any(
+            pattern in normalized_answer
+            for pattern in page_patterns
+        )
+    )
+
+    return evaluation
 
 
 def calculate_rate(
     results: list[dict],
     metric: str,
-) -> float:
+) -> float | None:
     """
-    Calculate percentage success rate for
-    a boolean evaluation metric.
-
-    Results where the metric is None are
-    excluded from the denominator.
+    Calculate a percentage while ignoring
+    non-applicable None values.
     """
 
-    applicable_results = [
-        result
+    applicable = [
+        result[metric]
         for result in results
-        if result.get(metric) is not None
+        if result.get(metric)
+        is not None
     ]
 
-    if not applicable_results:
-        return 0.0
-
-    successful = sum(
-        bool(result[metric])
-        for result in applicable_results
-    )
+    if not applicable:
+        return None
 
     return (
-        successful
-        / len(applicable_results)
+        sum(applicable)
+        / len(applicable)
         * 100
     )
 
 
-def count_applicable(
+def format_rate(
+    rate: float | None,
+) -> str:
+    if rate is None:
+        return "N/A"
+
+    return f"{rate:.1f}%"
+
+
+def print_category_summary(
     results: list[dict],
-    metric: str,
-) -> int:
+) -> None:
     """
-    Count cases to which a metric applies.
-    """
-
-    return sum(
-        result.get(metric) is not None
-        for result in results
-    )
-
-
-def main():
-    """
-    Run the complete EquityAI RAG evaluation.
+    Report performance separately for each
+    benchmark category.
     """
 
+    grouped = defaultdict(list)
+
+    for result in results:
+        grouped[
+            result["category"]
+        ].append(result)
+
+    print()
+    print("PERFORMANCE BY CATEGORY")
+    print("=" * 60)
+
+    for category in sorted(grouped):
+        category_results = grouped[
+            category
+        ]
+
+        answer_rate = calculate_rate(
+            category_results,
+            "answer_match",
+        )
+
+        abstention_rate = calculate_rate(
+            category_results,
+            "abstention_match",
+        )
+
+        retrieval_rate = calculate_rate(
+            category_results,
+            "retrieval_hit",
+        )
+
+        print(
+            f"{category}:"
+        )
+        print(
+            f"  Cases: "
+            f"{len(category_results)}"
+        )
+
+        if answer_rate is not None:
+            print(
+                "  Answer accuracy: "
+                f"{format_rate(answer_rate)}"
+            )
+
+        if abstention_rate is not None:
+            print(
+                "  Abstention accuracy: "
+                f"{format_rate(abstention_rate)}"
+            )
+
+        if retrieval_rate is not None:
+            print(
+                "  Retrieval hit rate: "
+                f"{format_rate(retrieval_rate)}"
+            )
+
+        print("-" * 60)
+
+
+def main() -> None:
     dataset = load_dataset()
+
+    results = []
+    failures = 0
 
     print(
         f"\nRunning {len(dataset)} "
         "RAG evaluation cases...\n"
     )
 
-    results = []
-
-    failed_cases = 0
-
     for case in dataset:
-
         print(
             f"Evaluating: {case['id']}"
         )
-
+        print(
+            f"Category: "
+            f"{case.get('category', 'uncategorized')}"
+        )
         print(
             f"Question: {case['question']}"
         )
 
+        case_type = (
+            "ANSWERABLE"
+            if case["answerable"]
+            else "UNANSWERABLE"
+        )
+
         print(
-            "Case type: "
-            + (
-                "ANSWERABLE"
-                if case["answerable"]
-                else "UNANSWERABLE"
-            )
+            f"Case type: {case_type}"
         )
 
         try:
-
-            result = evaluate_case(case)
-
-            results.append(result)
-
-            print(
-                f"Answer: {result['answer']}"
+            evaluation = evaluate_case(
+                case
             )
 
-            if result["answerable"]:
+            results.append(evaluation)
 
+            print(
+                f"Answer: "
+                f"{evaluation['answer']}"
+            )
+
+            if case["answerable"]:
                 print(
                     "Expected answer: "
-                    f"{result['expected_answer']}"
+                    f"{case['expected_answer']}"
                 )
-
                 print(
                     "Answer match: "
-                    f"{result['answer_match']}"
+                    f"{evaluation['answer_match']}"
                 )
-
                 print(
                     "Retrieval hit: "
-                    f"{result['retrieval_hit']}"
+                    f"{evaluation['retrieval_hit']}"
                 )
-
                 print(
                     "Top-1 hit: "
-                    f"{result['top1_hit']}"
+                    f"{evaluation['top1_hit']}"
                 )
-
                 print(
                     "Citation match: "
-                    f"{result['citation_match']}"
+                    f"{evaluation['citation_match']}"
                 )
-
             else:
-
                 print(
                     "Expected behaviour: "
                     "ABSTAIN"
                 )
-
                 print(
                     "Abstention match: "
-                    f"{result['abstention_match']}"
+                    f"{evaluation['abstention_match']}"
                 )
 
         except Exception as error:
-
-            failed_cases += 1
+            failures += 1
 
             print(
-                f"Evaluation failed: {error}"
+                "Evaluation error: "
+                f"{error}"
             )
 
         print("-" * 60)
 
-    if not results:
-
-        print(
-            "\nNo evaluation cases "
-            "completed successfully."
-        )
-
-        return
-
-    # -----------------------------------------
-    # Calculate aggregate metrics
-    # -----------------------------------------
-
-    answer_accuracy = calculate_rate(
-        results,
-        "answer_match",
+    answerable_count = sum(
+        1
+        for case in dataset
+        if case["answerable"]
     )
 
-    retrieval_hit_rate = calculate_rate(
-        results,
-        "retrieval_hit",
+    unanswerable_count = (
+        len(dataset)
+        - answerable_count
     )
 
-    top1_accuracy = calculate_rate(
-        results,
-        "top1_hit",
-    )
-
-    citation_accuracy = calculate_rate(
-        results,
-        "citation_match",
-    )
-
-    abstention_accuracy = calculate_rate(
-        results,
-        "abstention_match",
-    )
-
-    answerable_cases = count_applicable(
-        results,
-        "answer_match",
-    )
-
-    unanswerable_cases = count_applicable(
-        results,
-        "abstention_match",
-    )
-
-    # -----------------------------------------
-    # Print evaluation summary
-    # -----------------------------------------
-
-    print("\nEQUITYAI RAG EVALUATION")
+    print()
+    print("EQUITYAI RAG EVALUATION")
     print("=" * 60)
-
     print(
         f"Cases completed: "
         f"{len(results)}/{len(dataset)}"
     )
-
     print(
         f"Evaluation failures: "
-        f"{failed_cases}"
+        f"{failures}"
     )
-
     print(
         f"Answerable cases: "
-        f"{answerable_cases}"
+        f"{answerable_count}"
     )
-
     print(
         f"Unanswerable cases: "
-        f"{unanswerable_cases}"
+        f"{unanswerable_count}"
     )
-
     print("-" * 60)
 
     print(
-        f"Answer accuracy: "
-        f"{answer_accuracy:.1f}%"
+        "Answer accuracy: "
+        f"{format_rate(calculate_rate(results, 'answer_match'))}"
     )
 
     print(
-        f"Retrieval hit rate: "
-        f"{retrieval_hit_rate:.1f}%"
+        "Retrieval hit rate: "
+        f"{format_rate(calculate_rate(results, 'retrieval_hit'))}"
     )
 
     print(
-        f"Top-1 retrieval accuracy: "
-        f"{top1_accuracy:.1f}%"
+        "Top-1 retrieval accuracy: "
+        f"{format_rate(calculate_rate(results, 'top1_hit'))}"
     )
 
     print(
-        f"Citation accuracy: "
-        f"{citation_accuracy:.1f}%"
+        "Citation accuracy: "
+        f"{format_rate(calculate_rate(results, 'citation_match'))}"
     )
 
     print(
-        f"Abstention accuracy: "
-        f"{abstention_accuracy:.1f}%"
+        "Abstention accuracy: "
+        f"{format_rate(calculate_rate(results, 'abstention_match'))}"
     )
 
     print("=" * 60)
+
+    print_category_summary(
+        results
+    )
 
 
 if __name__ == "__main__":
