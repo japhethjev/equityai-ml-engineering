@@ -291,3 +291,96 @@ def test_rag_failure_returns_503(
         "What is the IPO offer price?",
         request_id=request_id,
     )
+
+@patch("app.api.main.get_rag_metrics")
+def test_rag_metrics_endpoint(
+    mock_get_rag_metrics,
+):
+    """
+    The RAG metrics endpoint should expose
+    aggregate production observability data.
+    """
+
+    mock_get_rag_metrics.return_value = {
+        "requests_total": 4,
+        "outcomes": {
+            "answered": 2,
+            "abstained": 1,
+            "errors": 1,
+        },
+        "rates": {
+            "answered_pct": 50.0,
+            "abstained_pct": 25.0,
+            "error_pct": 25.0,
+        },
+        "latency_ms": {
+            "embedding_ms": {
+                "count": 4,
+                "p50": 100.0,
+                "p95": 190.0,
+                "p99": 198.0,
+            },
+            "retrieval_ms": {
+                "count": 4,
+                "p50": 20.0,
+                "p95": 38.0,
+                "p99": 39.6,
+            },
+            "reranking_ms": {
+                "count": 4,
+                "p50": 2.0,
+                "p95": 3.8,
+                "p99": 3.96,
+            },
+            "generation_ms": {
+                "count": 3,
+                "p50": 4000.0,
+                "p95": 4900.0,
+                "p99": 4980.0,
+            },
+            "total_ms": {
+                "count": 4,
+                "p50": 4300.0,
+                "p95": 5700.0,
+                "p99": 5940.0,
+            },
+        },
+    }
+
+    response = client.get(
+        "/metrics/rag"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["requests_total"] == 4
+
+    assert data["outcomes"] == {
+        "answered": 2,
+        "abstained": 1,
+        "errors": 1,
+    }
+
+    assert data["rates"] == {
+        "answered_pct": 50.0,
+        "abstained_pct": 25.0,
+        "error_pct": 25.0,
+    }
+
+    assert (
+        data["latency_ms"]
+        ["total_ms"]
+        ["p50"]
+        == 4300.0
+    )
+
+    assert (
+        data["latency_ms"]
+        ["generation_ms"]
+        ["count"]
+        == 3
+    )
+
+    mock_get_rag_metrics.assert_called_once_with()

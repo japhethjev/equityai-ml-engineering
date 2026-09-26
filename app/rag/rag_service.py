@@ -8,6 +8,7 @@ from app.observability import (
     log_rag_error,
     log_rag_request,
     measure_stage,
+    record_rag_metrics,
 )
 from app.rag.embedding_service import embed_text
 from app.rag.vector_store import hybrid_search
@@ -226,6 +227,11 @@ def answer_question(
             timings=timings,
         )
 
+        record_rag_metrics(
+            outcome="ERROR",
+            timings=timings,
+        )
+
     # =====================================================
     # 1. EMBEDDING
     # =====================================================
@@ -311,6 +317,11 @@ def answer_question(
             outcome="ABSTAINED",
             retrieved_chunks=len(retrieved),
             used_chunks=0,
+            timings=timings,
+        )
+
+        record_rag_metrics(
+            outcome="ABSTAINED",
             timings=timings,
         )
 
@@ -631,6 +642,11 @@ RETRIEVED EVIDENCE:
         outcome=outcome,
         retrieved_chunks=len(retrieved),
         used_chunks=len(top_results),
+        timings=timings,
+    )
+
+    record_rag_metrics(
+        outcome=outcome,
         timings=timings,
     )
 
