@@ -1,0 +1,107 @@
+name: EquityAI AWS Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: equityai-api
+  ECS_TASK_FAMILY: equityai-api
+
+jobs:
+  deploy:
+    name: Build and Publish to AWS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          pytest -q
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::009910376113:role/EquityAIGitHubActionsRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+
+          echo "image=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Download current ECS task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_FAMILY" \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Prepare new ECS task definition
+        env:
+          IMAGE_URI: ${{ steps.build-image.outputs.image }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          path = "task-definition.json"
+
+          with open(path) as f:
+              task = json.load(f)
+
+          for field in [
+              "taskDefinitionArn",
+              "revision",
+              "status",
+              "requiresAttributes",
+              "compatibilities",
+              "registeredAt",
+              "registeredBy",
+          ]:
+              task.pop(field, None)
+
+          task["containerDefinitions"][0]["image"] = os.environ["IMAGE_URI"]
+
+          with open("task-definition-deploy.json", "w") as f:
+              json.dump(task, f, indent=2)
+          PY
+
+      - name: Register new ECS task definition
+        run: |
+          aws ecs register-task-definition \
+            --cli-input-json file://task-definition-deploy.json \
+            --query 'taskDefinition.{Family:family,Revision:revision,Image:containerDefinitions[0].image}' \
+            --output json
