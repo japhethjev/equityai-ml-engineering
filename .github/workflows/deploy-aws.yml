@@ -15,6 +15,8 @@ env:
   AWS_REGION: eu-west-2
   ECR_REPOSITORY: equityai-api
   ECS_TASK_FAMILY: equityai-api
+  ECS_CLUSTER: equityai-production
+  ECS_SERVICE: equityai-api-service
 
 jobs:
   deploy:
@@ -100,8 +102,30 @@ jobs:
           PY
 
       - name: Register new ECS task definition
+        id: register-task
         run: |
-          aws ecs register-task-definition \
+          TASK_DEFINITION_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://task-definition-deploy.json \
-            --query 'taskDefinition.{Family:family,Revision:revision,Image:containerDefinitions[0].image}' \
-            --output json
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task_definition_arn=$TASK_DEFINITION_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered: $TASK_DEFINITION_ARN"
+
+      - name: Deploy new task definition to ECS service
+        env:
+          TASK_DEFINITION_ARN: ${{ steps.register-task.outputs.task_definition_arn }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$TASK_DEFINITION_ARN" \
+            --force-new-deployment
+
+          echo "Waiting for ECS service to become stable..."
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
+
+          echo "ECS deployment completed successfully"
