@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 import tempfile
 import time
@@ -6,12 +7,14 @@ import uuid
 from pathlib import Path
 
 from fastapi import (
+    Depends,
     FastAPI,
     File,
     HTTPException,
     Request,
     UploadFile,
 )
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from app.observability import get_rag_metrics
@@ -47,6 +50,39 @@ app = FastAPI(
     title="EquityAI RAG API",
     version="1.0.0",
 )
+
+
+# ---------------------------------------------------------
+# API authentication
+# ---------------------------------------------------------
+
+api_key_header = APIKeyHeader(
+    name="X-API-Key",
+    auto_error=False,
+)
+
+
+def verify_api_key(
+    api_key: str = Depends(api_key_header),
+):
+    expected_key = os.getenv("EQUITYAI_API_KEY")
+
+    if not expected_key:
+        logger.error(
+            "EQUITYAI_API_KEY is not configured"
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="API authentication is not configured.",
+        )
+
+    if api_key != expected_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API key.",
+        )
+
+    return api_key
 
 
 # ---------------------------------------------------------
@@ -225,6 +261,7 @@ def rag_metrics():
 def ask(
     payload: QuestionRequest,
     request: Request,
+    api_key: str = Depends(verify_api_key),
 ):
     """
     Answer a question using the EquityAI RAG pipeline.

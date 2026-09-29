@@ -1,9 +1,17 @@
+import os
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from app.api.main import app
 
+
+TEST_API_KEY = "equityai-test-key"
+os.environ["EQUITYAI_API_KEY"] = TEST_API_KEY
+
+AUTH_HEADERS = {
+    "X-API-Key": TEST_API_KEY,
+}
 
 client = TestClient(app)
 
@@ -56,6 +64,7 @@ def test_empty_question():
 
     response = client.post(
         "/ask",
+        headers=AUTH_HEADERS,
         json={
             "question": "   "
         },
@@ -112,6 +121,7 @@ def test_valid_question(mock_answer_question):
 
     response = client.post(
         "/ask",
+        headers=AUTH_HEADERS,
         json={
             "question": "What is the IPO offer price?"
         },
@@ -265,6 +275,7 @@ def test_rag_failure_returns_503(
 
     response = client.post(
         "/ask",
+        headers=AUTH_HEADERS,
         json={
             "question": "What is the IPO offer price?"
         },
