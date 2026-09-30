@@ -395,3 +395,52 @@ def test_rag_metrics_endpoint(
     )
 
     mock_get_rag_metrics.assert_called_once_with()
+
+@patch("app.api.main.answer_question")
+def test_ask_rate_limit(mock_answer_question):
+    """
+    The /ask endpoint should reject requests that
+    exceed 10 requests per minute per client.
+    """
+
+    from app.api.main import limiter
+
+    limiter.reset()
+
+    mock_answer_question.return_value = {
+        "answer": "Test answer",
+        "sources": [],
+        "request_id": "test",
+    }
+
+    try:
+        for _ in range(10):
+            response = client.post(
+                "/ask",
+                headers=AUTH_HEADERS,
+                json={
+                    "question": "Rate limit test"
+                },
+            )
+
+            assert response.status_code == 200
+
+        response = client.post(
+            "/ask",
+            headers=AUTH_HEADERS,
+            json={
+                "question": "Rate limit test"
+            },
+        )
+
+        assert response.status_code == 429
+
+        assert response.json() == {
+            "detail": (
+                "Rate limit exceeded. "
+                "Please try again later."
+            )
+        }
+
+    finally:
+        limiter.reset()

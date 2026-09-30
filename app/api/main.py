@@ -14,8 +14,13 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.observability import get_rag_metrics
 from app.rag.ingest import ingest_document
@@ -50,6 +55,23 @@ app = FastAPI(
     title="EquityAI RAG API",
     version="1.0.0",
 )
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(
+    request: Request,
+    exc: RateLimitExceeded,
+):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "Rate limit exceeded. Please try again later."
+        },
+    )
 
 
 # ---------------------------------------------------------
@@ -258,6 +280,7 @@ def rag_metrics():
 # ---------------------------------------------------------
 
 @app.post("/ask")
+@limiter.limit("10/minute")
 def ask(
     payload: QuestionRequest,
     request: Request,
