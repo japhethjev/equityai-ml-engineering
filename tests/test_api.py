@@ -444,3 +444,53 @@ def test_ask_rate_limit(mock_answer_question):
 
     finally:
         limiter.reset()
+
+
+def test_cors_allows_equityai_frontend():
+    """
+    The production EquityAI frontend should be
+    permitted to make browser requests to the API.
+    """
+
+    response = client.options(
+        "/ask",
+        headers={
+            "Origin": "https://equityai.com.ng",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "Content-Type,X-API-Key"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert (
+        response.headers["access-control-allow-origin"]
+        == "https://equityai.com.ng"
+    )
+
+
+def test_cors_rejects_unknown_origin():
+    """
+    An unapproved website should not receive
+    CORS permission from the API.
+    """
+
+    response = client.options(
+        "/ask",
+        headers={
+            "Origin": "https://example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "Content-Type,X-API-Key"
+            ),
+        },
+    )
+
+    assert (
+        response.headers.get(
+            "access-control-allow-origin"
+        )
+        is None
+    )

@@ -14,6 +14,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
@@ -54,6 +55,20 @@ logger = logging.getLogger("equityai-api")
 app = FastAPI(
     title="EquityAI RAG API",
     version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://equityai.com.ng",
+        "https://www.equityai.com.ng",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=[
+        "Content-Type",
+        "X-API-Key",
+    ],
 )
 
 limiter = Limiter(key_func=get_remote_address)
