@@ -12,7 +12,13 @@ from app.observability import (
 )
 from app.rag.embedding_service import embed_text
 from app.rag.vector_store import hybrid_search
-from app.rag.reranker import rerank_results
+from app.rag.reranker import (
+    rerank_results,
+    select_balanced_evidence,
+)
+from app.rag.retrieval_scope import (
+    resolve_retrieval_scope,
+)
 
 
 ABSTENTION_TEXT = (
@@ -233,7 +239,31 @@ def answer_question(
         )
 
     # =====================================================
-    # 1. EMBEDDING
+    # 1. RETRIEVAL SCOPE
+    # =====================================================
+
+    try:
+        with measure_stage(
+            "scope_resolution",
+            timings,
+        ):
+            retrieval_scope = (
+                resolve_retrieval_scope(query)
+            )
+
+            document_ids = retrieval_scope[
+                "document_ids"
+            ]
+
+    except Exception as error:
+        record_error(
+            "scope_resolution",
+            error,
+        )
+        raise
+
+    # =====================================================
+    # 2. EMBEDDING
     # =====================================================
 
     try:
@@ -265,6 +295,7 @@ def answer_question(
                 query=query,
                 query_embedding=query_embedding,
                 limit=5,
+                document_ids=document_ids,
             )
 
     except Exception as error:
@@ -295,7 +326,11 @@ def answer_question(
         )
         raise
 
-    top_results = ranked[:3]
+    top_results = select_balanced_evidence(
+        ranked,
+        document_ids=document_ids,
+        limit=3,
+    )
 
     # =====================================================
     # 4. EMPTY RETRIEVAL

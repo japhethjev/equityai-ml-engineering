@@ -10,6 +10,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     HTTPException,
     Request,
     UploadFile,
@@ -364,11 +365,144 @@ def ask(
 @app.post("/documents/upload")
 def upload_document(
     file: UploadFile = File(...),
+    company_name: str = Form(...),
+    ticker: str = Form(...),
+    exchange: str = Form(...),
+    market: str | None = Form(None),
+    country: str = Form(...),
+    currency: str = Form(...),
+    report_type: str = Form(...),
+    fiscal_year: int = Form(...),
+    fiscal_quarter: int | None = Form(None),
+    fiscal_half: int | None = Form(None),
+    period_start: str | None = Form(None),
+    period_end: str = Form(...),
+    publication_date: str | None = Form(None),
+    reporting_period: str | None = Form(None),
+    _: None = Depends(verify_api_key),
 ):
     """
     Upload and ingest a PDF document into the
     EquityAI RAG system.
     """
+
+    # -------------------------------------------------
+    # Validate financial-report metadata
+    # -------------------------------------------------
+
+    normalized_report_type = report_type.strip().lower()
+
+    allowed_report_types = {
+        "annual",
+        "quarterly",
+        "half_year",
+        "other",
+    }
+
+    if normalized_report_type not in allowed_report_types:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "report_type must be one of: "
+                "annual, quarterly, half_year, other."
+            ),
+        )
+
+    if not company_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="company_name is required.",
+        )
+
+    if not ticker.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="ticker is required.",
+        )
+
+    if not exchange.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="exchange is required.",
+        )
+
+    if not country.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="country is required.",
+        )
+
+    if not currency.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="currency is required.",
+        )
+
+    if fiscal_year < 1900 or fiscal_year > 2200:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid fiscal_year.",
+        )
+
+    # Quarterly filings explicitly support Q4.
+    # Some issuers publish Q4 separately while others publish
+    # only a full-year/annual filing.
+    if normalized_report_type == "quarterly":
+        if fiscal_quarter not in {1, 2, 3, 4}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Quarterly reports require "
+                    "fiscal_quarter 1, 2, 3 or 4."
+                ),
+            )
+
+        if fiscal_half is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "fiscal_half must not be supplied "
+                    "for quarterly reports."
+                ),
+            )
+
+    elif normalized_report_type == "half_year":
+        if fiscal_half not in {1, 2}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Half-year reports require "
+                    "fiscal_half 1 or 2."
+                ),
+            )
+
+        if fiscal_quarter is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "fiscal_quarter must not be supplied "
+                    "for half-year reports."
+                ),
+            )
+
+    else:
+        if fiscal_quarter is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "fiscal_quarter may only be supplied "
+                    "for quarterly reports."
+                ),
+            )
+
+        if fiscal_half is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "fiscal_half may only be supplied "
+                    "for half-year reports."
+                ),
+            )
 
     original_filename = Path(
         file.filename or ""
@@ -426,6 +560,29 @@ def upload_document(
         stats = ingest_document(
             str(temp_path),
             document_name=original_filename,
+            company_name=company_name.strip(),
+            ticker=ticker.strip().upper(),
+            market=(
+                market.strip()
+                if market
+                else None
+            ),
+            exchange=exchange.strip().upper(),
+            country=country.strip(),
+            currency=currency.strip().upper(),
+            document_type="financial_report",
+            report_type=normalized_report_type,
+            reporting_period=(
+                reporting_period.strip()
+                if reporting_period
+                else None
+            ),
+            fiscal_year=fiscal_year,
+            fiscal_quarter=fiscal_quarter,
+            fiscal_half=fiscal_half,
+            period_start=period_start,
+            period_end=period_end,
+            publication_date=publication_date,
         )
 
         logger.info(

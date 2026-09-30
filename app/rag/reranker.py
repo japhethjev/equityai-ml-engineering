@@ -98,3 +98,77 @@ def rerank_results(
         key=lambda x: x["final_score"],
         reverse=True,
     )
+
+def select_balanced_evidence(
+    ranked_results: list[dict],
+    document_ids: list[str] | None = None,
+    limit: int = 3,
+) -> list[dict]:
+    """
+    Select final evidence while preserving document coverage.
+
+    For multi-document retrieval, the highest-ranked available
+    chunk from each requested document is selected first.
+    Remaining slots are then filled by global reranking order.
+
+    Single-document and unrestricted retrieval preserve the
+    existing top-N behaviour.
+    """
+
+    if limit <= 0:
+        raise ValueError(
+            "limit must be greater than zero"
+        )
+
+    if not ranked_results:
+        return []
+
+    if not document_ids or len(document_ids) <= 1:
+        return ranked_results[:limit]
+
+    # Preserve requested document order while removing duplicates.
+    requested_ids = list(
+        dict.fromkeys(
+            str(document_id)
+            for document_id in document_ids
+        )
+    )
+
+    selected = []
+    selected_positions = set()
+
+    # First pass: best available chunk from each document.
+    for document_id in requested_ids:
+        if len(selected) >= limit:
+            break
+
+        for position, result in enumerate(
+            ranked_results
+        ):
+            result_document_id = result.get(
+                "document_id"
+            )
+
+            if (
+                result_document_id is not None
+                and str(result_document_id)
+                == document_id
+            ):
+                selected.append(result)
+                selected_positions.add(position)
+                break
+
+    # Second pass: fill remaining capacity using global rank.
+    for position, result in enumerate(
+        ranked_results
+    ):
+        if len(selected) >= limit:
+            break
+
+        if position in selected_positions:
+            continue
+
+        selected.append(result)
+        selected_positions.add(position)
+
+    return selected
