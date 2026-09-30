@@ -45,6 +45,40 @@ CALCULATION_INTENT_PHRASES = (
 )
 
 
+COMPARISON_INTENT_PHRASES = (
+    "compare",
+    "comparison",
+    "versus",
+    " vs ",
+    "change from",
+    "change between",
+)
+
+
+def explicitly_requests_comparison(
+    query: str,
+) -> bool:
+    """
+    Return True when the user explicitly requests a
+    comparison between financial reporting periods.
+
+    Comparison intent permits calculation of absolute
+    and percentage changes, provided the underlying
+    period values are directly supported by evidence.
+    """
+
+    normalized_query = (
+        " "
+        + " ".join(query.lower().split())
+        + " "
+    )
+
+    return any(
+        phrase in normalized_query
+        for phrase in COMPARISON_INTENT_PHRASES
+    )
+
+
 def explicitly_requests_calculation(
     query: str,
 ) -> bool:
@@ -185,6 +219,7 @@ def answer_question(
 
     calculation_allowed = (
         explicitly_requests_calculation(query)
+        or explicitly_requests_comparison(query)
     )
 
     # -----------------------------------------------------
