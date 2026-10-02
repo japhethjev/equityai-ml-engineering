@@ -26,6 +26,9 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.observability import get_rag_metrics
 from app.rag.ingest import ingest_document
+from app.rag.financial_analysis_service import (
+    answer_financial_analysis_question,
+)
 from app.rag.rag_service import answer_question
 from app.rag.vector_store import (
     delete_document,
@@ -329,10 +332,21 @@ def ask(
     )
 
     try:
-        result = answer_question(
+        # Deterministic financial analysis gets first refusal.
+        #
+        # A None result means the question does not belong to the
+        # deterministic historical financial-analysis path, so the
+        # existing RAG service remains the fallback.
+        result = answer_financial_analysis_question(
             question,
             request_id=request_id,
         )
+
+        if result is None:
+            result = answer_question(
+                question,
+                request_id=request_id,
+            )
 
         logger.info(
             "Question answered successfully "
@@ -366,8 +380,8 @@ def ask(
 def upload_document(
     file: UploadFile = File(...),
     company_name: str = Form(...),
-    ticker: str = Form(...),
-    exchange: str = Form(...),
+    ticker: str | None = Form(None),
+    exchange: str | None = Form(None),
     market: str | None = Form(None),
     country: str = Form(...),
     currency: str = Form(...),
@@ -414,17 +428,29 @@ def upload_document(
             detail="company_name is required.",
         )
 
-    if not ticker.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="ticker is required.",
-        )
+    # Ticker and exchange are optional because private,
+    # unlisted, pre-IPO and research-covered issuers may not
+    # have public-market identifiers.
+    #
+    # Multipart forms commonly submit optional fields as empty
+    # strings, so normalize blank values to None before ingestion.
+    ticker = (
+        ticker.strip()
+        if ticker and ticker.strip()
+        else None
+    )
 
-    if not exchange.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="exchange is required.",
-        )
+    exchange = (
+        exchange.strip()
+        if exchange and exchange.strip()
+        else None
+    )
+
+    market = (
+        market.strip()
+        if market and market.strip()
+        else None
+    )
 
     if not country.strip():
         raise HTTPException(
@@ -561,13 +587,13 @@ def upload_document(
             str(temp_path),
             document_name=original_filename,
             company_name=company_name.strip(),
-            ticker=ticker.strip().upper(),
+            ticker=ticker.upper() if ticker else None,
             market=(
                 market.strip()
                 if market
                 else None
             ),
-            exchange=exchange.strip().upper(),
+            exchange=exchange.upper() if exchange else None,
             country=country.strip(),
             currency=currency.strip().upper(),
             document_type="financial_report",
@@ -668,7 +694,9 @@ def upload_document(
 # ---------------------------------------------------------
 
 @app.get("/documents")
-def get_documents():
+def get_documents(
+    _: None = Depends(verify_api_key),
+):
     """
     List documents currently stored in the
     vector database.
@@ -712,6 +740,7 @@ def get_documents():
 )
 def remove_document(
     document_name: str,
+    _: None = Depends(verify_api_key),
 ):
     """
     Delete all vector chunks belonging to a

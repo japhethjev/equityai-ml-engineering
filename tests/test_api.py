@@ -187,7 +187,10 @@ def test_list_documents(mock_list_documents):
         },
     ]
 
-    response = client.get("/documents")
+    response = client.get(
+        "/documents",
+        headers=AUTH_HEADERS,
+    )
 
     assert response.status_code == 200
 
@@ -218,7 +221,8 @@ def test_delete_document(mock_delete_document):
     mock_delete_document.return_value = 1
 
     response = client.delete(
-        "/documents/equityai_test_company.pdf"
+        "/documents/equityai_test_company.pdf",
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 200
@@ -246,7 +250,8 @@ def test_delete_missing_document(
     mock_delete_document.return_value = 0
 
     response = client.delete(
-        "/documents/missing_document.pdf"
+        "/documents/missing_document.pdf",
+        headers=AUTH_HEADERS,
     )
 
     assert response.status_code == 404
@@ -258,6 +263,28 @@ def test_delete_missing_document(
     mock_delete_document.assert_called_once_with(
         "missing_document.pdf"
     )
+
+def test_list_documents_requires_api_key():
+    """
+    Document inventory must not be publicly accessible.
+    """
+
+    response = client.get("/documents")
+
+    assert response.status_code == 401
+
+
+def test_delete_document_requires_api_key():
+    """
+    Document deletion must not be publicly accessible.
+    """
+
+    response = client.delete(
+        "/documents/security-test-document.pdf"
+    )
+
+    assert response.status_code == 401
+
 
 @patch("app.api.main.answer_question")
 def test_rag_failure_returns_503(
@@ -494,3 +521,246 @@ def test_cors_rejects_unknown_origin():
         )
         is None
     )
+
+
+def test_ask_uses_financial_analysis_when_available(
+    monkeypatch,
+):
+    financial_result = {
+        "answer": "FINANCIAL ANALYSIS",
+        "sources": [],
+        "request_id": "financial-request",
+        "analysis_type": "financial",
+        "complete_history": True,
+        "requested_period_count": 2,
+        "available_period_count": 2,
+        "missing_metrics": [],
+    }
+
+    def fake_financial(
+        question,
+        request_id=None,
+    ):
+        assert "revenue" in question.lower()
+        assert request_id is not None
+        return {
+            **financial_result,
+            "request_id": request_id,
+        }
+
+    def fail_rag(*args, **kwargs):
+        raise AssertionError(
+            "Ordinary RAG must not run when "
+            "financial analysis succeeds."
+        )
+
+    monkeypatch.setattr(
+        "app.api.main."
+        "answer_financial_analysis_question",
+        fake_financial,
+    )
+
+    monkeypatch.setattr(
+        "app.api.main.answer_question",
+        fail_rag,
+    )
+
+    response = client.post(
+        "/ask",
+        headers=AUTH_HEADERS,
+        json={
+            "question": (
+                "Show ABC revenue for the "
+                "last 2 years."
+            )
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert (
+        body["answer"]
+        == "FINANCIAL ANALYSIS"
+    )
+
+    assert (
+        body["analysis_type"]
+        == "financial"
+    )
+
+    assert body["request_id"]
+
+
+def test_ask_falls_back_to_existing_rag(
+    monkeypatch,
+):
+    calls = {
+        "financial": 0,
+        "rag": 0,
+    }
+
+    def fake_financial(
+        question,
+        request_id=None,
+    ):
+        calls["financial"] += 1
+        return None
+
+    def fake_rag(
+        question,
+        request_id=None,
+    ):
+        calls["rag"] += 1
+
+        return {
+            "answer": "ORDINARY RAG ANSWER",
+            "sources": [],
+            "request_id": request_id,
+        }
+
+    monkeypatch.setattr(
+        "app.api.main."
+        "answer_financial_analysis_question",
+        fake_financial,
+    )
+
+    monkeypatch.setattr(
+        "app.api.main.answer_question",
+        fake_rag,
+    )
+
+    response = client.post(
+        "/ask",
+        headers=AUTH_HEADERS,
+        json={
+            "question": (
+                "What is the IPO offer price?"
+            )
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert (
+        body["answer"]
+        == "ORDINARY RAG ANSWER"
+    )
+
+    assert calls == {
+        "financial": 1,
+        "rag": 1,
+    }
+
+    assert body["request_id"]
+
+
+@patch("app.api.main.ingest_document")
+def test_upload_accepts_tickerless_company(
+    mock_ingest_document,
+):
+    """
+    Private or unlisted issuers may not have a ticker or exchange.
+    The upload API must preserve that valid issuer state rather
+    than rejecting the document before ingestion.
+    """
+
+    mock_ingest_document.return_value = {
+        "document_id": (
+            "11111111-1111-1111-1111-111111111111"
+        ),
+        "document": "dangote-report.pdf",
+        "status": "completed",
+        "total_chunks": 10,
+        "new_chunks": 10,
+        "existing_chunks": 0,
+        "inserted": 10,
+        "skipped": 0,
+    }
+
+    response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "dangote-report.pdf",
+                b"%PDF-1.4 test",
+                "application/pdf",
+            ),
+        },
+        data={
+            "company_name": (
+                "Dangote Petroleum Refinery FZE"
+            ),
+            "country": "Nigeria",
+            "currency": "NGN",
+            "report_type": "annual",
+            "fiscal_year": "2025",
+            "period_end": "2025-12-31",
+        },
+    )
+
+    assert response.status_code == 200
+
+    kwargs = mock_ingest_document.call_args.kwargs
+
+    assert kwargs["company_name"] == (
+        "Dangote Petroleum Refinery FZE"
+    )
+    assert kwargs["ticker"] is None
+    assert kwargs["exchange"] is None
+
+
+@patch("app.api.main.ingest_document")
+def test_upload_converts_blank_ticker_and_exchange_to_none(
+    mock_ingest_document,
+):
+    """
+    HTML multipart forms commonly submit optional empty fields as
+    empty strings. The API must normalize those values to None.
+    """
+
+    mock_ingest_document.return_value = {
+        "document_id": (
+            "22222222-2222-2222-2222-222222222222"
+        ),
+        "document": "private-company.pdf",
+        "status": "completed",
+        "total_chunks": 5,
+        "new_chunks": 5,
+        "existing_chunks": 0,
+        "inserted": 5,
+        "skipped": 0,
+    }
+
+    response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "private-company.pdf",
+                b"%PDF-1.4 test",
+                "application/pdf",
+            ),
+        },
+        data={
+            "company_name": "Private Company Limited",
+            "ticker": "",
+            "exchange": "",
+            "country": "Nigeria",
+            "currency": "NGN",
+            "report_type": "annual",
+            "fiscal_year": "2025",
+            "period_end": "2025-12-31",
+        },
+    )
+
+    assert response.status_code == 200
+
+    kwargs = mock_ingest_document.call_args.kwargs
+
+    assert kwargs["ticker"] is None
+    assert kwargs["exchange"] is None

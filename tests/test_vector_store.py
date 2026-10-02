@@ -419,3 +419,303 @@ def test_hybrid_search_without_scope_preserves_global_retrieval(
         "IPO offer price",
         5,
     )
+
+
+@patch("app.rag.vector_store.get_connection")
+def test_resolve_historical_annual_documents(
+    mock_get_connection,
+):
+    from app.rag.vector_store import (
+        resolve_historical_documents,
+    )
+
+    rows = [
+        sample_row(
+            report_type="annual",
+            fiscal_year=2021,
+        ),
+        sample_row(
+            report_type="annual",
+            fiscal_year=2022,
+        ),
+        sample_row(
+            report_type="annual",
+            fiscal_year=2023,
+        ),
+    ]
+
+    connection_context, cursor = make_connection(
+        rows
+    )
+    mock_get_connection.return_value = (
+        connection_context
+    )
+
+    results = resolve_historical_documents(
+        ticker="abc",
+        exchange="ngx",
+        period_type="annual",
+        count=3,
+    )
+
+    assert len(results) == 3
+
+    sql = cursor.execute.call_args.args[0]
+    params = cursor.execute.call_args.args[1]
+
+    assert "LOWER(report_type) = %s" in sql
+    assert "is_current = TRUE" in sql
+    assert "LIMIT %s" in sql
+
+    assert params == (
+        "ABC",
+        "NGX",
+        "annual",
+        3,
+    )
+
+
+@patch("app.rag.vector_store.get_connection")
+def test_resolve_historical_quarterly_documents(
+    mock_get_connection,
+):
+    from app.rag.vector_store import (
+        resolve_historical_documents,
+    )
+
+    rows = [
+        sample_row(
+            report_type="quarterly",
+            fiscal_year=2025,
+            fiscal_quarter=1,
+        ),
+        sample_row(
+            report_type="quarterly",
+            fiscal_year=2025,
+            fiscal_quarter=2,
+        ),
+    ]
+
+    connection_context, cursor = make_connection(
+        rows
+    )
+    mock_get_connection.return_value = (
+        connection_context
+    )
+
+    results = resolve_historical_documents(
+        ticker="ABC",
+        period_type="quarterly",
+        count=8,
+    )
+
+    assert len(results) == 2
+
+    sql = cursor.execute.call_args.args[0]
+    params = cursor.execute.call_args.args[1]
+
+    assert "LOWER(report_type) = %s" in sql
+    assert "fiscal_quarter DESC" in sql
+
+    assert params == (
+        "ABC",
+        "quarterly",
+        8,
+    )
+
+
+@patch("app.rag.vector_store.get_connection")
+def test_historical_resolver_preserves_shortfall(
+    mock_get_connection,
+):
+    from app.rag.vector_store import (
+        resolve_historical_documents,
+    )
+
+    # Database contains only three available reports,
+    # even though five were requested.
+    rows = [
+        sample_row(fiscal_year=2023),
+        sample_row(fiscal_year=2024),
+        sample_row(fiscal_year=2025),
+    ]
+
+    connection_context, _ = make_connection(
+        rows
+    )
+    mock_get_connection.return_value = (
+        connection_context
+    )
+
+    results = resolve_historical_documents(
+        ticker="ABC",
+        period_type="annual",
+        count=5,
+    )
+
+    assert len(results) == 3
+
+
+def test_historical_resolver_rejects_invalid_period_type():
+    from app.rag.vector_store import (
+        resolve_historical_documents,
+    )
+
+    try:
+        resolve_historical_documents(
+            ticker="ABC",
+            period_type="monthly",
+            count=5,
+        )
+    except ValueError as exc:
+        assert (
+            "period_type must be annual or quarterly"
+            in str(exc)
+        )
+    else:
+        raise AssertionError(
+            "Expected invalid period type to fail"
+        )
+
+
+def test_historical_resolver_rejects_zero_count():
+    from app.rag.vector_store import (
+        resolve_historical_documents,
+    )
+
+    try:
+        resolve_historical_documents(
+            ticker="ABC",
+            period_type="annual",
+            count=0,
+        )
+    except ValueError as exc:
+        assert (
+            "count must be greater than zero"
+            in str(exc)
+        )
+    else:
+        raise AssertionError(
+            "Expected zero count to fail"
+        )
+
+
+@patch(
+    "app.rag.vector_store.get_connection"
+)
+def test_get_document_chunks_returns_ordered_chunks(
+    mock_get_connection,
+):
+    from app.rag.vector_store import (
+        get_document_chunks,
+    )
+
+    document_id = (
+        "11111111-1111-1111-1111-111111111111"
+    )
+
+    connection = (
+        mock_get_connection.return_value
+        .__enter__.return_value
+    )
+
+    cursor = (
+        connection.cursor.return_value
+        .__enter__.return_value
+    )
+
+    cursor.fetchall.return_value = [
+        (
+            document_id,
+            "report.pdf",
+            1,
+            0,
+            "2024 2025 H1 2026",
+        ),
+        (
+            document_id,
+            "report.pdf",
+            1,
+            1,
+            "Revenue 100 120 80",
+        ),
+    ]
+
+    result = get_document_chunks(
+        document_id
+    )
+
+    assert result == [
+        {
+            "document_id": document_id,
+            "document": "report.pdf",
+            "page": 1,
+            "chunk": 0,
+            "content": "2024 2025 H1 2026",
+        },
+        {
+            "document_id": document_id,
+            "document": "report.pdf",
+            "page": 1,
+            "chunk": 1,
+            "content": "Revenue 100 120 80",
+        },
+    ]
+
+    cursor.execute.assert_called_once()
+
+    sql, parameters = (
+        cursor.execute.call_args.args
+    )
+
+    assert (
+        "WHERE document_id = %s::uuid"
+        in sql
+    )
+
+    assert "ORDER BY page, chunk" in sql
+
+    assert parameters == (
+        document_id,
+    )
+
+
+@patch(
+    "app.rag.vector_store.get_connection"
+)
+def test_get_document_chunks_returns_empty_when_none(
+    mock_get_connection,
+):
+    from app.rag.vector_store import (
+        get_document_chunks,
+    )
+
+    connection = (
+        mock_get_connection.return_value
+        .__enter__.return_value
+    )
+
+    cursor = (
+        connection.cursor.return_value
+        .__enter__.return_value
+    )
+
+    cursor.fetchall.return_value = []
+
+    assert get_document_chunks(
+        "11111111-1111-1111-1111-111111111111"
+    ) == []
+
+
+def test_get_document_chunks_requires_document_id():
+    from app.rag.vector_store import (
+        get_document_chunks,
+    )
+
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="document_id is required",
+    ):
+        get_document_chunks(" ")

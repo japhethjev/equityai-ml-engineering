@@ -100,3 +100,51 @@ def test_ticker_does_not_match_inside_word():
     )
 
     assert result is None
+
+
+def test_unique_partial_company_name_resolves_tickerless_issuer():
+    companies = [
+        {
+            "company_name": "Dangote Petroleum Refinery FZE",
+            "ticker": None,
+            "exchange": None,
+            "market": None,
+            "country": "Nigeria",
+        }
+    ]
+
+    result = resolve_company_from_question(
+        (
+            "Show Dangote Petroleum Refinery revenue "
+            "for the last 2 years."
+        ),
+        companies,
+    )
+
+    assert result is not None
+    assert (
+        result["company_name"]
+        == "Dangote Petroleum Refinery FZE"
+    )
+    assert result["ticker"] is None
+
+
+def test_partial_company_name_does_not_guess_when_ambiguous():
+    companies = [
+        {
+            "company_name": "Dangote Petroleum Refinery FZE",
+            "ticker": None,
+            "exchange": None,
+        },
+        {
+            "company_name": "Dangote Cement Plc",
+            "ticker": "DANGCEM",
+            "exchange": "NGX",
+        },
+    ]
+
+    with pytest.raises(AmbiguousCompanyError):
+        resolve_company_from_question(
+            "Show Dangote revenue for the last 2 years.",
+            companies,
+        )

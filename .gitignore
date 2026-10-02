@@ -221,3 +221,6 @@ __marimo__/
 /data/*.pdf
 # Generated RAG evaluation reports
 evaluation/results/
+
+# Local database backups
+backups/

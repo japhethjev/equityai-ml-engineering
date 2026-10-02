@@ -1,12 +1,16 @@
 from app.rag.company_selector import (
     resolve_company_from_question,
 )
+from app.rag.historical_selector import (
+    parse_historical_selection,
+)
 from app.rag.report_selector import (
     parse_report_selections,
 )
 from app.rag.vector_store import (
     list_registered_companies,
     resolve_documents,
+    resolve_historical_documents,
 )
 
 
@@ -24,21 +28,17 @@ def resolve_retrieval_scope(
     """
     Determine which registered financial reports may be searched.
 
-    Returns:
-        {
-            "company": dict | None,
-            "selections": list[ReportSelection],
-            "documents": list[dict],
-            "document_ids": list[str] | None,
-            "filtered": bool,
-        }
+    Supports:
+    - unrestricted retrieval,
+    - company-scoped retrieval,
+    - explicit reporting periods,
+    - multi-period comparisons,
+    - historical annual windows,
+    - historical quarterly windows.
 
-    Unrestricted retrieval remains available when the question
-    contains neither a registered company nor an explicit
-    reporting period.
-
-    A reporting period without a company is rejected rather than
-    searching that period across unrelated issuers.
+    Historical requests return only reports actually available
+    in the registry. A shortfall is exposed explicitly through
+    requested_periods and available_periods.
     """
 
     companies = list_registered_companies()
@@ -52,7 +52,13 @@ def resolve_retrieval_scope(
         question
     )
 
-    has_period_constraint = any(
+    historical_selection = (
+        parse_historical_selection(
+            question
+        )
+    )
+
+    has_explicit_period_constraint = any(
         selection.report_type is not None
         or selection.fiscal_year is not None
         or selection.fiscal_quarter is not None
@@ -61,22 +67,88 @@ def resolve_retrieval_scope(
         for selection in selections
     )
 
+    has_historical_constraint = (
+        historical_selection is not None
+    )
+
+    has_period_constraint = (
+        has_explicit_period_constraint
+        or has_historical_constraint
+    )
+
     if company is None and has_period_constraint:
         raise MissingCompanyError(
             "A company or ticker is required when "
             "requesting a specific financial-report period."
         )
 
+    # -----------------------------------------------------
     # No issuer and no period:
-    # preserve existing unrestricted RAG behaviour.
+    # preserve unrestricted RAG behaviour.
+    # -----------------------------------------------------
+
     if company is None:
         return {
             "company": None,
             "selections": selections,
+            "historical_selection": None,
             "documents": [],
             "document_ids": None,
             "filtered": False,
+            "historical": False,
+            "requested_periods": None,
+            "available_periods": None,
+            "period_type": None,
         }
+
+    # -----------------------------------------------------
+    # Historical window
+    # -----------------------------------------------------
+
+    if historical_selection is not None:
+        documents = resolve_historical_documents(
+            ticker=company["ticker"],
+            exchange=company.get("exchange"),
+            period_type=(
+                historical_selection.period_type
+            ),
+            count=historical_selection.count,
+            current_only=True,
+        )
+
+        if not documents:
+            raise ReportNotFoundError(
+                "No financial reports are available "
+                "for the requested historical window."
+            )
+
+        document_ids = [
+            document["document_id"]
+            for document in documents
+        ]
+
+        return {
+            "company": company,
+            "selections": selections,
+            "historical_selection": (
+                historical_selection
+            ),
+            "documents": documents,
+            "document_ids": document_ids,
+            "filtered": True,
+            "historical": True,
+            "requested_periods": (
+                historical_selection.count
+            ),
+            "available_periods": len(documents),
+            "period_type": (
+                historical_selection.period_type
+            ),
+        }
+
+    # -----------------------------------------------------
+    # Existing explicit-period / company-only resolution
+    # -----------------------------------------------------
 
     documents = []
 
@@ -96,7 +168,10 @@ def resolve_retrieval_scope(
         if selection.latest:
             matches = matches[:1]
 
-        if has_period_constraint and not matches:
+        if (
+            has_explicit_period_constraint
+            and not matches
+        ):
             raise ReportNotFoundError(
                 "The requested financial report is not "
                 "available in the document registry."
@@ -125,7 +200,12 @@ def resolve_retrieval_scope(
     return {
         "company": company,
         "selections": selections,
+        "historical_selection": None,
         "documents": unique_documents,
         "document_ids": document_ids,
         "filtered": True,
+        "historical": False,
+        "requested_periods": None,
+        "available_periods": None,
+        "period_type": None,
     }

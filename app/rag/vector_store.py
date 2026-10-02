@@ -858,7 +858,10 @@ def list_registered_companies() -> list[dict]:
                 FROM documents
                 WHERE ingestion_status = 'completed'
                   AND is_current = TRUE
-                  AND ticker IS NOT NULL
+                  AND (
+                      ticker IS NOT NULL
+                      OR company_name IS NOT NULL
+                  )
                 ORDER BY
                     company_name,
                     exchange,
@@ -875,6 +878,440 @@ def list_registered_companies() -> list[dict]:
             "exchange": row[2],
             "market": row[3],
             "country": row[4],
+        }
+        for row in rows
+    ]
+
+
+def resolve_historical_documents(
+    ticker: str | None,
+    period_type: str,
+    count: int,
+    exchange: str | None = None,
+    current_only: bool = True,
+    company_name: str | None = None,
+) -> list[dict]:
+    """
+    Resolve the latest N registered financial reports for an
+    issuer.
+
+    Listed issuers are resolved primarily by ticker, optionally
+    constrained by exchange.
+
+    Tickerless issuers are resolved by exact normalized company
+    name.
+
+    Only documents actually present in the registry are returned.
+    Results are ordered chronologically, oldest to newest.
+    """
+
+    normalized_ticker = (
+        ticker.strip().upper()
+        if ticker
+        else None
+    )
+
+    normalized_company_name = (
+        " ".join(
+            company_name.strip().split()
+        )
+        if company_name
+        else None
+    )
+
+    if (
+        not normalized_ticker
+        and not normalized_company_name
+    ):
+        raise ValueError(
+            "ticker or company_name is required"
+        )
+
+    normalized_period_type = (
+        period_type.strip().lower()
+    )
+
+    if normalized_period_type not in {
+        "annual",
+        "quarterly",
+    }:
+        raise ValueError(
+            "period_type must be annual or quarterly"
+        )
+
+    if count <= 0:
+        raise ValueError(
+            "count must be greater than zero"
+        )
+
+    conditions = [
+        "ingestion_status = 'completed'",
+    ]
+
+    parameters = []
+
+    if normalized_ticker:
+        conditions.append(
+            "UPPER(ticker) = %s"
+        )
+        parameters.append(
+            normalized_ticker
+        )
+
+        if exchange:
+            conditions.append(
+                "UPPER(exchange) = %s"
+            )
+            parameters.append(
+                exchange.strip().upper()
+            )
+
+    else:
+        conditions.append(
+            """
+            LOWER(
+                REGEXP_REPLACE(
+                    TRIM(company_name),
+                    '\\s+',
+                    ' ',
+                    'g'
+                )
+            ) = LOWER(%s)
+            """
+        )
+        parameters.append(
+            normalized_company_name
+        )
+
+    # Strict filing-type selection remains appropriate here.
+    # Supporting multi-period documents are handled separately
+    # by the financial-analysis scope/evidence layer.
+    conditions.append(
+        "LOWER(report_type) = %s"
+    )
+    parameters.append(
+        normalized_period_type
+    )
+
+    if current_only:
+        conditions.append(
+            "is_current = TRUE"
+        )
+
+    where_clause = " AND ".join(
+        conditions
+    )
+
+    sql = f"""
+        SELECT
+            document_id,
+            document_name,
+            company_name,
+            ticker,
+            exchange,
+            market,
+            country,
+            currency,
+            report_type,
+            fiscal_year,
+            fiscal_quarter,
+            fiscal_half,
+            period_start,
+            period_end,
+            publication_date,
+            filing_version,
+            is_current
+        FROM (
+            SELECT
+                document_id,
+                document_name,
+                company_name,
+                ticker,
+                exchange,
+                market,
+                country,
+                currency,
+                report_type,
+                fiscal_year,
+                fiscal_quarter,
+                fiscal_half,
+                period_start,
+                period_end,
+                publication_date,
+                filing_version,
+                is_current,
+                created_at
+            FROM documents
+            WHERE {where_clause}
+            ORDER BY
+                period_end DESC NULLS LAST,
+                fiscal_year DESC NULLS LAST,
+                fiscal_quarter DESC NULLS LAST,
+                publication_date DESC NULLS LAST,
+                filing_version DESC,
+                created_at DESC
+            LIMIT %s
+        ) AS latest_reports
+        ORDER BY
+            period_end ASC NULLS FIRST,
+            fiscal_year ASC NULLS FIRST,
+            fiscal_quarter ASC NULLS FIRST,
+            publication_date ASC NULLS FIRST
+    """
+
+    parameters.append(count)
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql,
+                tuple(parameters),
+            )
+
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "document_id": str(row[0]),
+            "document_name": row[1],
+            "company_name": row[2],
+            "ticker": row[3],
+            "exchange": row[4],
+            "market": row[5],
+            "country": row[6],
+            "currency": row[7],
+            "report_type": row[8],
+            "fiscal_year": row[9],
+            "fiscal_quarter": row[10],
+            "fiscal_half": row[11],
+            "period_start": (
+                row[12].isoformat()
+                if row[12]
+                else None
+            ),
+            "period_end": (
+                row[13].isoformat()
+                if row[13]
+                else None
+            ),
+            "publication_date": (
+                row[14].isoformat()
+                if row[14]
+                else None
+            ),
+            "filing_version": row[15],
+            "is_current": row[16],
+        }
+        for row in rows
+    ]
+
+def get_document_chunks(
+    document_id: str,
+) -> list[dict]:
+    """
+    Return every stored chunk belonging to one registered document.
+
+    Chunks are returned in deterministic page/chunk order.
+
+    This function is intended for structured financial extraction,
+    where the complete document evidence must be inspected rather
+    than retrieving only semantically similar chunks.
+    """
+
+    normalized_document_id = (
+        str(document_id).strip()
+    )
+
+    if not normalized_document_id:
+        raise ValueError(
+            "document_id is required"
+        )
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    document_id,
+                    document,
+                    page,
+                    chunk,
+                    content
+                FROM document_chunks
+                WHERE document_id = %s::uuid
+                ORDER BY page, chunk
+                """,
+                (
+                    normalized_document_id,
+                ),
+            )
+
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "document_id": str(row[0]),
+            "document": row[1],
+            "page": row[2],
+            "chunk": row[3],
+            "content": row[4],
+        }
+        for row in rows
+    ]
+
+
+def resolve_supporting_documents(
+    *,
+    ticker: str | None = None,
+    exchange: str | None = None,
+    company_name: str | None = None,
+    current_only: bool = True,
+) -> list[dict]:
+    """
+    Return completed registered documents for an issuer that may
+    contain financial evidence across multiple reporting periods.
+
+    Unlike resolve_historical_documents(), this function does not
+    require the document's report_type to equal annual or quarterly.
+
+    Period suitability is determined later from grounded financial
+    facts extracted from the document.
+    """
+
+    normalized_ticker = (
+        ticker.strip().upper()
+        if ticker
+        else None
+    )
+
+    normalized_company_name = (
+        " ".join(company_name.strip().split())
+        if company_name
+        else None
+    )
+
+    if (
+        not normalized_ticker
+        and not normalized_company_name
+    ):
+        raise ValueError(
+            "ticker or company_name is required"
+        )
+
+    conditions = [
+        "ingestion_status = 'completed'",
+    ]
+    parameters = []
+
+    if normalized_ticker:
+        conditions.append(
+            "UPPER(ticker) = %s"
+        )
+        parameters.append(
+            normalized_ticker
+        )
+
+        if exchange:
+            conditions.append(
+                "UPPER(exchange) = %s"
+            )
+            parameters.append(
+                exchange.strip().upper()
+            )
+
+    else:
+        conditions.append(
+            """
+            LOWER(
+                REGEXP_REPLACE(
+                    TRIM(company_name),
+                    '\\s+',
+                    ' ',
+                    'g'
+                )
+            ) = LOWER(%s)
+            """
+        )
+        parameters.append(
+            normalized_company_name
+        )
+
+    if current_only:
+        conditions.append(
+            "is_current = TRUE"
+        )
+
+    where_clause = " AND ".join(
+        conditions
+    )
+
+    sql = f"""
+        SELECT
+            document_id,
+            document_name,
+            company_name,
+            ticker,
+            exchange,
+            market,
+            country,
+            currency,
+            report_type,
+            fiscal_year,
+            fiscal_quarter,
+            fiscal_half,
+            period_start,
+            period_end,
+            publication_date,
+            filing_version,
+            is_current
+        FROM documents
+        WHERE {where_clause}
+        ORDER BY
+            period_end DESC NULLS LAST,
+            publication_date DESC NULLS LAST,
+            filing_version DESC,
+            created_at DESC
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql,
+                tuple(parameters),
+            )
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "document_id": str(row[0]),
+            "document_name": row[1],
+            "company_name": row[2],
+            "ticker": row[3],
+            "exchange": row[4],
+            "market": row[5],
+            "country": row[6],
+            "currency": row[7],
+            "report_type": row[8],
+            "fiscal_year": row[9],
+            "fiscal_quarter": row[10],
+            "fiscal_half": row[11],
+            "period_start": (
+                row[12].isoformat()
+                if row[12]
+                else None
+            ),
+            "period_end": (
+                row[13].isoformat()
+                if row[13]
+                else None
+            ),
+            "publication_date": (
+                row[14].isoformat()
+                if row[14]
+                else None
+            ),
+            "filing_version": row[15],
+            "is_current": row[16],
         }
         for row in rows
     ]
