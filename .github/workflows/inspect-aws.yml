@@ -1,0 +1,196 @@
+name: Inspect EquityAI AWS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-west-2
+  ECS_CLUSTER: equityai-production
+  ECS_SERVICE: equityai-api-service
+  ECS_TASK_FAMILY: equityai-api
+
+jobs:
+  inspect:
+    name: Inspect AWS Infrastructure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::009910376113:role/EquityAIGitHubActionsRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS identity
+        run: |
+          echo "=== AWS IDENTITY ==="
+          aws sts get-caller-identity
+
+      - name: Inspect ECS service
+        run: |
+          echo "=== CURRENT ECS SERVICE ==="
+
+          aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].{
+              serviceName:serviceName,
+              status:status,
+              desiredCount:desiredCount,
+              runningCount:runningCount,
+              taskDefinition:taskDefinition,
+              launchType:launchType,
+              capacityProviderStrategy:capacityProviderStrategy,
+              networkConfiguration:networkConfiguration,
+              loadBalancers:loadBalancers
+            }'
+
+      - name: Inspect ECS task definition
+        run: |
+          echo "=== CURRENT TASK DEFINITION ==="
+
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_FAMILY" \
+            --query 'taskDefinition.{
+              family:family,
+              revision:revision,
+              taskRoleArn:taskRoleArn,
+              executionRoleArn:executionRoleArn,
+              networkMode:networkMode,
+              cpu:cpu,
+              memory:memory,
+              requiresCompatibilities:requiresCompatibilities,
+              containers:containerDefinitions[].{
+                name:name,
+                image:image,
+                command:command,
+                entryPoint:entryPoint,
+                cpu:cpu,
+                memory:memory,
+                memoryReservation:memoryReservation,
+                environment:environment,
+                secrets:secrets,
+                logConfiguration:logConfiguration,
+                portMappings:portMappings
+              }
+            }'
+
+      - name: Inspect ECS cluster
+        run: |
+          echo "=== ECS CLUSTER ==="
+
+          aws ecs describe-clusters \
+            --clusters "$ECS_CLUSTER" \
+            --query 'clusters[0].{
+              clusterName:clusterName,
+              status:status,
+              runningTasksCount:runningTasksCount,
+              pendingTasksCount:pendingTasksCount,
+              activeServicesCount:activeServicesCount,
+              capacityProviders:capacityProviders
+            }'
+
+      - name: Inspect S3
+        run: |
+          echo "=== EXISTING S3 BUCKETS ==="
+
+          aws s3api list-buckets \
+            --query 'Buckets[].Name' \
+            --output table
+
+      - name: Inspect SQS
+        run: |
+          echo "=== EXISTING SQS QUEUES ==="
+
+          aws sqs list-queues \
+            --region "$AWS_REGION" \
+            --query 'QueueUrls' \
+            --output table
+
+      - name: Inspect ECS services
+        run: |
+          echo "=== ECS SERVICES ==="
+
+          aws ecs list-services \
+            --cluster "$ECS_CLUSTER" \
+            --query 'serviceArns' \
+            --output table
+
+      - name: Inspect EquityAI task definitions
+        run: |
+          echo "=== TASK DEFINITIONS ==="
+
+          aws ecs list-task-definitions \
+            --family-prefix equityai \
+            --status ACTIVE \
+            --sort DESC \
+            --query 'taskDefinitionArns[:20]' \
+            --output table
+
+      - name: Inspect RDS
+        run: |
+          echo "=== RDS DATABASES ==="
+
+          aws rds describe-db-instances \
+            --query 'DBInstances[].{
+              Identifier:DBInstanceIdentifier,
+              Engine:Engine,
+              Status:DBInstanceStatus,
+              Endpoint:Endpoint.Address,
+              Port:Endpoint.Port,
+              VpcId:DBSubnetGroup.VpcId
+            }' \
+            --output table
+
+      - name: Inspect ECS IAM roles
+        run: |
+          echo "=== ECS IAM ROLES ==="
+
+          TASK_ROLE=$(aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_FAMILY" \
+            --query 'taskDefinition.taskRoleArn' \
+            --output text)
+
+          EXEC_ROLE=$(aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_FAMILY" \
+            --query 'taskDefinition.executionRoleArn' \
+            --output text)
+
+          echo "Task role: $TASK_ROLE"
+          echo "Execution role: $EXEC_ROLE"
+
+          if [ -n "$TASK_ROLE" ] && [ "$TASK_ROLE" != "None" ]; then
+            TASK_ROLE_NAME="${TASK_ROLE##*/}"
+
+            echo
+            echo "=== TASK ROLE ATTACHED POLICIES ==="
+
+            aws iam list-attached-role-policies \
+              --role-name "$TASK_ROLE_NAME"
+
+            echo
+            echo "=== TASK ROLE INLINE POLICIES ==="
+
+            aws iam list-role-policies \
+              --role-name "$TASK_ROLE_NAME"
+          fi
+
+          if [ -n "$EXEC_ROLE" ] && [ "$EXEC_ROLE" != "None" ]; then
+            EXEC_ROLE_NAME="${EXEC_ROLE##*/}"
+
+            echo
+            echo "=== EXECUTION ROLE ATTACHED POLICIES ==="
+
+            aws iam list-attached-role-policies \
+              --role-name "$EXEC_ROLE_NAME"
+
+            echo
+            echo "=== EXECUTION ROLE INLINE POLICIES ==="
+
+            aws iam list-role-policies \
+              --role-name "$EXEC_ROLE_NAME"
+          fi
