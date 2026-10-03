@@ -9,3 +9,4 @@ fastapi
 uvicorn
 python-multipart
 slowapi==0.1.10
+boto3

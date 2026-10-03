@@ -658,9 +658,9 @@ def test_ask_falls_back_to_existing_rag(
     assert body["request_id"]
 
 
-@patch("app.api.main.ingest_document")
+@patch("app.api.main.dispatch_document_ingestion")
 def test_upload_accepts_tickerless_company(
-    mock_ingest_document,
+    mock_dispatch_document_ingestion,
 ):
     """
     Private or unlisted issuers may not have a ticker or exchange.
@@ -668,17 +668,13 @@ def test_upload_accepts_tickerless_company(
     than rejecting the document before ingestion.
     """
 
-    mock_ingest_document.return_value = {
+    mock_dispatch_document_ingestion.return_value = {
         "document_id": (
             "11111111-1111-1111-1111-111111111111"
         ),
         "document": "dangote-report.pdf",
-        "status": "completed",
-        "total_chunks": 10,
-        "new_chunks": 10,
-        "existing_chunks": 0,
-        "inserted": 10,
-        "skipped": 0,
+        "status": "queued",
+        "message_id": "message-111",
     }
 
     response = client.post(
@@ -703,9 +699,9 @@ def test_upload_accepts_tickerless_company(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
 
-    kwargs = mock_ingest_document.call_args.kwargs
+    kwargs = mock_dispatch_document_ingestion.call_args.kwargs
 
     assert kwargs["company_name"] == (
         "Dangote Petroleum Refinery FZE"
@@ -714,26 +710,22 @@ def test_upload_accepts_tickerless_company(
     assert kwargs["exchange"] is None
 
 
-@patch("app.api.main.ingest_document")
+@patch("app.api.main.dispatch_document_ingestion")
 def test_upload_converts_blank_ticker_and_exchange_to_none(
-    mock_ingest_document,
+    mock_dispatch_document_ingestion,
 ):
     """
     HTML multipart forms commonly submit optional empty fields as
     empty strings. The API must normalize those values to None.
     """
 
-    mock_ingest_document.return_value = {
+    mock_dispatch_document_ingestion.return_value = {
         "document_id": (
             "22222222-2222-2222-2222-222222222222"
         ),
         "document": "private-company.pdf",
-        "status": "completed",
-        "total_chunks": 5,
-        "new_chunks": 5,
-        "existing_chunks": 0,
-        "inserted": 5,
-        "skipped": 0,
+        "status": "queued",
+        "message_id": "message-222",
     }
 
     response = client.post(
@@ -758,9 +750,9 @@ def test_upload_converts_blank_ticker_and_exchange_to_none(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
 
-    kwargs = mock_ingest_document.call_args.kwargs
+    kwargs = mock_dispatch_document_ingestion.call_args.kwargs
 
     assert kwargs["ticker"] is None
     assert kwargs["exchange"] is None

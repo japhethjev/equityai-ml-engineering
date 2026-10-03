@@ -25,7 +25,9 @@ from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.observability import get_rag_metrics
-from app.rag.ingest import ingest_document
+from app.rag.ingestion_dispatch import (
+    dispatch_document_ingestion,
+)
 from app.rag.financial_analysis_service import (
     answer_financial_analysis_question,
 )
@@ -376,7 +378,10 @@ def ask(
 # Upload document
 # ---------------------------------------------------------
 
-@app.post("/documents/upload")
+@app.post(
+    "/documents/upload",
+    status_code=202,
+)
 def upload_document(
     file: UploadFile = File(...),
     company_name: str = Form(...),
@@ -396,8 +401,8 @@ def upload_document(
     _: None = Depends(verify_api_key),
 ):
     """
-    Upload and ingest a PDF document into the
-    EquityAI RAG system.
+    Upload a PDF document and queue it for asynchronous
+    ingestion into the EquityAI RAG system.
     """
 
     # -------------------------------------------------
@@ -575,15 +580,15 @@ def upload_document(
             )
 
         logger.info(
-            "Starting document ingestion: %s",
+            "Dispatching document ingestion: %s",
             original_filename,
         )
 
         # -------------------------------------------------
-        # Ingest document
+        # Persist the PDF and enqueue asynchronous ingestion
         # -------------------------------------------------
 
-        stats = ingest_document(
+        result = dispatch_document_ingestion(
             str(temp_path),
             document_name=original_filename,
             company_name=company_name.strip(),
@@ -612,34 +617,19 @@ def upload_document(
         )
 
         logger.info(
-            "Document ingestion completed: "
-            "document=%s "
-            "total_chunks=%s "
-            "new_chunks=%s "
-            "existing_chunks=%s "
-            "inserted=%s "
-            "skipped=%s",
+            "Document ingestion dispatched: "
+            "document=%s document_id=%s status=%s",
             original_filename,
-            stats.get(
-                "total_chunks"
-            ),
-            stats.get(
-                "new_chunks"
-            ),
-            stats.get(
-                "existing_chunks"
-            ),
-            stats.get(
-                "inserted"
-            ),
-            stats.get(
-                "skipped"
-            ),
+            result.get("document_id"),
+            result.get("status"),
         )
 
         return {
-            "status": "success",
-            **stats,
+            "status": result.get(
+                "status",
+                "queued",
+            ),
+            **result,
         }
 
     except HTTPException:
@@ -647,14 +637,14 @@ def upload_document(
 
     except Exception:
         logger.exception(
-            "Document ingestion failed: %s",
+            "Document ingestion dispatch failed: %s",
             original_filename,
         )
 
         raise HTTPException(
             status_code=503,
             detail=(
-                "Document ingestion temporarily "
+                "Document ingestion dispatch temporarily "
                 "unavailable."
             ),
         )

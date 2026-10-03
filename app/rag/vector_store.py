@@ -571,12 +571,14 @@ def register_document(
                     period_start,
                     period_end,
                     publication_date,
-                    ingestion_status
+                    ingestion_status,
+                    dispatch_lease_expires_at
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, 'processing'
+                    %s, %s, %s, %s, %s, 'queued',
+                    NOW() + INTERVAL '15 minutes'
                 )
                 RETURNING document_id
                 """,
@@ -607,7 +609,7 @@ def register_document(
 
     return {
         "document_id": str(document_id),
-        "status": "processing",
+        "status": "queued",
         "processed_pages": 0,
         "processed_chunks": 0,
         "last_processed_page": 0,
@@ -615,6 +617,106 @@ def register_document(
         "total_chunks": None,
         "is_new": True,
     }
+
+
+def claim_document_for_ingestion(
+    document_id: str,
+) -> dict:
+    """
+    Atomically claim a queued or failed document for one worker.
+
+    Only one concurrent worker can change the document from queued
+    or failed to processing. Completed or already-processing
+    documents are returned without being claimed.
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE documents
+                SET ingestion_status = 'processing',
+                    processing_lease_expires_at =
+                        NOW() + INTERVAL '15 minutes',
+                    dispatch_lease_expires_at = NULL,
+                    error_message = NULL
+                WHERE document_id = %s
+                  AND (
+                      ingestion_status IN ('queued', 'failed')
+                      OR (
+                          ingestion_status = 'processing'
+                          AND (
+                              processing_lease_expires_at IS NULL
+                              OR processing_lease_expires_at <= NOW()
+                          )
+                      )
+                  )
+                RETURNING
+                    document_id,
+                    ingestion_status,
+                    processed_pages,
+                    processed_chunks,
+                    last_processed_page,
+                    total_pages,
+                    total_chunks
+                """,
+                (document_id,),
+            )
+
+            row = cursor.fetchone()
+
+            if row:
+                connection.commit()
+
+                return {
+                    "document_id": str(row[0]),
+                    "status": row[1],
+                    "processed_pages": row[2] or 0,
+                    "processed_chunks": row[3] or 0,
+                    "last_processed_page": row[4] or 0,
+                    "total_pages": row[5],
+                    "total_chunks": row[6],
+                    "is_new": True,
+                    "claimed": True,
+                }
+
+            cursor.execute(
+                """
+                SELECT
+                    document_id,
+                    ingestion_status,
+                    processed_pages,
+                    processed_chunks,
+                    last_processed_page,
+                    total_pages,
+                    total_chunks
+                FROM documents
+                WHERE document_id = %s
+                """,
+                (document_id,),
+            )
+
+            row = cursor.fetchone()
+
+        connection.commit()
+
+    if row is None:
+        raise ValueError(
+            f"Document not found: {document_id}"
+        )
+
+    return {
+        "document_id": str(row[0]),
+        "status": row[1],
+        "processed_pages": row[2] or 0,
+        "processed_chunks": row[3] or 0,
+        "last_processed_page": row[4] or 0,
+        "total_pages": row[5],
+        "total_chunks": row[6],
+        "is_new": False,
+        "claimed": False,
+    }
+
 
 def update_document_progress(
     document_id: str,
@@ -633,6 +735,8 @@ def update_document_progress(
                     processed_chunks = %s,
                     last_processed_page = %s,
                     ingestion_status = 'processing',
+                    processing_lease_expires_at =
+                        NOW() + INTERVAL '15 minutes',
                     error_message = NULL
                 WHERE document_id = %s
                 """,
@@ -665,6 +769,7 @@ def complete_document(
                     total_chunks = %s,
                     processed_chunks = %s,
                     last_processed_page = %s,
+                    processing_lease_expires_at = NULL,
                     error_message = NULL
                 WHERE document_id = %s
                 """,
@@ -693,6 +798,7 @@ def fail_document(
                 """
                 UPDATE documents
                 SET ingestion_status = 'failed',
+                    processing_lease_expires_at = NULL,
                     error_message = %s
                 WHERE document_id = %s
                 """,
@@ -1315,3 +1421,190 @@ def resolve_supporting_documents(
         }
         for row in rows
     ]
+
+
+def claim_document_for_dispatch(
+    document_id: str,
+) -> dict:
+    """
+    Atomically claim an orphaned queued document for redispatch.
+
+    A queued document can be reclaimed only when its dispatch lease
+    is missing or expired. Renewing the lease in the same UPDATE
+    prevents concurrent API requests from both redispatching it.
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE documents
+                SET dispatch_lease_expires_at =
+                        NOW() + INTERVAL '15 minutes',
+                    error_message = NULL
+                WHERE document_id = %s
+                  AND ingestion_status = 'queued'
+                  AND (
+                      dispatch_lease_expires_at IS NULL
+                      OR dispatch_lease_expires_at <= NOW()
+                  )
+                RETURNING
+                    document_id,
+                    ingestion_status,
+                    processed_pages,
+                    processed_chunks,
+                    last_processed_page,
+                    total_pages,
+                    total_chunks
+                """,
+                (document_id,),
+            )
+
+            claimed = cursor.fetchone()
+
+            if claimed:
+                connection.commit()
+
+                return {
+                    "document_id": str(claimed[0]),
+                    "status": claimed[1],
+                    "processed_pages": claimed[2] or 0,
+                    "processed_chunks": claimed[3] or 0,
+                    "last_processed_page": claimed[4] or 0,
+                    "total_pages": claimed[5],
+                    "total_chunks": claimed[6],
+                    "is_new": False,
+                    "claimed": True,
+                }
+
+            cursor.execute(
+                """
+                SELECT
+                    document_id,
+                    ingestion_status,
+                    processed_pages,
+                    processed_chunks,
+                    last_processed_page,
+                    total_pages,
+                    total_chunks
+                FROM documents
+                WHERE document_id = %s
+                """,
+                (document_id,),
+            )
+
+            existing = cursor.fetchone()
+
+        connection.commit()
+
+    if existing is None:
+        raise RuntimeError(
+            f"Document registry record not found: {document_id}"
+        )
+
+    return {
+        "document_id": str(existing[0]),
+        "status": existing[1],
+        "processed_pages": existing[2] or 0,
+        "processed_chunks": existing[3] or 0,
+        "last_processed_page": existing[4] or 0,
+        "total_pages": existing[5],
+        "total_chunks": existing[6],
+        "is_new": False,
+        "claimed": False,
+    }
+
+
+def claim_next_orphaned_dispatch() -> dict | None:
+    """
+    Atomically claim one queued document whose dispatch lease expired.
+
+    SKIP LOCKED allows multiple reconcilers to run concurrently
+    without selecting the same queued document.
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH candidate AS (
+                    SELECT document_id
+                    FROM documents
+                    WHERE ingestion_status = 'queued'
+                      AND (
+                          dispatch_lease_expires_at IS NULL
+                          OR dispatch_lease_expires_at <= NOW()
+                      )
+                    ORDER BY created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                UPDATE documents AS d
+                SET dispatch_lease_expires_at =
+                        NOW() + INTERVAL '15 minutes',
+                    error_message = NULL
+                FROM candidate
+                WHERE d.document_id = candidate.document_id
+                RETURNING
+                    d.document_id,
+                    d.document_hash,
+                    d.document_name,
+                    d.company_name,
+                    d.ticker,
+                    d.market,
+                    d.exchange,
+                    d.country,
+                    d.currency,
+                    d.document_type,
+                    d.report_type,
+                    d.reporting_period,
+                    d.fiscal_year,
+                    d.fiscal_quarter,
+                    d.fiscal_half,
+                    d.period_start,
+                    d.period_end,
+                    d.publication_date
+                """
+            )
+
+            row = cursor.fetchone()
+
+        connection.commit()
+
+    if row is None:
+        return None
+
+    return {
+        "document_id": str(row[0]),
+        "document_hash": row[1],
+        "document_name": row[2],
+        "metadata": {
+            "company_name": row[3],
+            "ticker": row[4],
+            "market": row[5],
+            "exchange": row[6],
+            "country": row[7],
+            "currency": row[8],
+            "document_type": row[9],
+            "report_type": row[10],
+            "reporting_period": row[11],
+            "fiscal_year": row[12],
+            "fiscal_quarter": row[13],
+            "fiscal_half": row[14],
+            "period_start": (
+                row[15].isoformat()
+                if row[15] is not None
+                else None
+            ),
+            "period_end": (
+                row[16].isoformat()
+                if row[16] is not None
+                else None
+            ),
+            "publication_date": (
+                row[17].isoformat()
+                if row[17] is not None
+                else None
+            ),
+        },
+    }

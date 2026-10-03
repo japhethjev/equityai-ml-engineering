@@ -17,6 +17,9 @@ env:
   ECS_TASK_FAMILY: equityai-api
   ECS_CLUSTER: equityai-production
   ECS_SERVICE: equityai-api-service
+  ECS_TASK_ROLE_ARN: arn:aws:iam::009910376113:role/equityaiEcsTaskRole
+  DOCUMENTS_S3_BUCKET: equityai-production-documents-009910376113
+  INGESTION_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/009910376113/equityai-document-ingestion
 
 jobs:
   deploy:
@@ -95,7 +98,27 @@ jobs:
           ]:
               task.pop(field, None)
 
-          task["containerDefinitions"][0]["image"] = os.environ["IMAGE_URI"]
+          task["taskRoleArn"] = os.environ["ECS_TASK_ROLE_ARN"]
+
+          container = task["containerDefinitions"][0]
+          container["image"] = os.environ["IMAGE_URI"]
+
+          environment = {
+              item["name"]: item
+              for item in container.get("environment", [])
+          }
+
+          environment["DOCUMENTS_S3_BUCKET"] = {
+              "name": "DOCUMENTS_S3_BUCKET",
+              "value": os.environ["DOCUMENTS_S3_BUCKET"],
+          }
+
+          environment["INGESTION_QUEUE_URL"] = {
+              "name": "INGESTION_QUEUE_URL",
+              "value": os.environ["INGESTION_QUEUE_URL"],
+          }
+
+          container["environment"] = list(environment.values())
 
           with open("task-definition-deploy.json", "w") as f:
               json.dump(task, f, indent=2)
@@ -111,6 +134,74 @@ jobs:
 
           echo "task_definition_arn=$TASK_DEFINITION_ARN" >> "$GITHUB_OUTPUT"
           echo "Registered: $TASK_DEFINITION_ARN"
+
+      - name: Run database migrations
+        env:
+          TASK_DEFINITION_ARN: ${{ steps.register-task.outputs.task_definition_arn }}
+        run: |
+          echo "Reading production ECS network configuration..."
+
+          NETWORK_CONFIGURATION=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].networkConfiguration' \
+            --output json)
+
+          echo "Starting one-off database migration task..."
+
+          MIGRATION_TASK_ARN=$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --launch-type FARGATE \
+            --task-definition "$TASK_DEFINITION_ARN" \
+            --network-configuration "$NETWORK_CONFIGURATION" \
+            --overrides '{
+              "containerOverrides": [
+                {
+                  "name": "equityai-api",
+                  "command": [
+                    "python",
+                    "scripts/apply_async_ingestion_migrations.py"
+                  ]
+                }
+              ]
+            }' \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          if [ -z "$MIGRATION_TASK_ARN" ] || [ "$MIGRATION_TASK_ARN" = "None" ]; then
+            echo "ERROR: ECS migration task failed to start."
+            exit 1
+          fi
+
+          echo "Migration task: $MIGRATION_TASK_ARN"
+          echo "Waiting for migration task to stop..."
+
+          aws ecs wait tasks-stopped \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "$MIGRATION_TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "$MIGRATION_TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          STOP_REASON=$(aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "$MIGRATION_TASK_ARN" \
+            --query 'tasks[0].stoppedReason' \
+            --output text)
+
+          echo "Migration task exit code: $EXIT_CODE"
+          echo "Migration task stop reason: $STOP_REASON"
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "ERROR: Database migration failed."
+            echo "Production API deployment has been blocked."
+            exit 1
+          fi
+
+          echo "Database migrations completed successfully."
 
       - name: Deploy new task definition to ECS service
         env:

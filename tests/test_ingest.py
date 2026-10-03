@@ -252,3 +252,94 @@ def test_failed_document_resumes_without_reembedding_existing_chunks(
         total_pages=2,
         total_chunks=2,
     )
+
+
+@patch("app.rag.ingest.complete_document")
+@patch("app.rag.ingest.update_document_progress")
+@patch("app.rag.ingest.register_document")
+@patch("app.rag.ingest.calculate_file_hash")
+@patch("app.rag.ingest.store_chunks")
+@patch("app.rag.ingest.embed_text")
+@patch("app.rag.ingest.chunk_exists")
+@patch("app.rag.ingest.chunk_pages")
+@patch("app.rag.ingest.iter_pdf_pages")
+def test_preregistered_document_skips_registration(
+    mock_iter_pdf_pages,
+    mock_chunk_pages,
+    mock_chunk_exists,
+    mock_embed_text,
+    mock_store_chunks,
+    mock_calculate_file_hash,
+    mock_register_document,
+    mock_update_document_progress,
+    mock_complete_document,
+):
+    """
+    A worker may ingest a document that the upload API has already
+    registered. It must not hash/register that document again.
+    """
+
+    document_id = (
+        "55555555-5555-5555-5555-555555555555"
+    )
+
+    registry = {
+        "document_id": document_id,
+        "document_hash": "precomputed-sha256",
+        "status": "processing",
+        "processed_pages": 0,
+        "processed_chunks": 0,
+        "last_processed_page": 0,
+        "total_pages": None,
+        "total_chunks": None,
+        "is_new": True,
+    }
+
+    mock_iter_pdf_pages.return_value = [
+        {
+            "page": 1,
+            "text": "Revenue increased during the year.",
+        }
+    ]
+
+    mock_chunk_pages.return_value = [
+        {
+            "page": 1,
+            "chunk": 1,
+            "text": "Revenue increased during the year.",
+        }
+    ]
+
+    mock_chunk_exists.return_value = False
+    mock_embed_text.return_value = [0.1, 0.2, 0.3]
+
+    mock_store_chunks.return_value = {
+        "inserted": 1,
+        "skipped": 0,
+    }
+
+    result = ingest_document(
+        "worker-copy.pdf",
+        document_name="annual-report.pdf",
+        company_name="Example Plc",
+        registry=registry,
+    )
+
+    mock_calculate_file_hash.assert_not_called()
+    mock_register_document.assert_not_called()
+
+    mock_embed_text.assert_called_once_with(
+        "Revenue increased during the year."
+    )
+
+    mock_store_chunks.assert_called_once()
+
+    mock_complete_document.assert_called_once_with(
+        document_id=document_id,
+        total_pages=1,
+        total_chunks=1,
+    )
+
+    assert result["document_id"] == document_id
+    assert result["document_hash"] == "precomputed-sha256"
+    assert result["inserted"] == 1

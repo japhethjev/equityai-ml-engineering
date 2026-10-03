@@ -62,6 +62,7 @@ def ingest_document(
     period_end: str | None = None,
     publication_date: str | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    registry: dict | None = None,
 ) -> dict:
     """
     Incrementally ingest a financial-report PDF into EquityAI.
@@ -103,29 +104,35 @@ def ingest_document(
     if safe_exchange:
         print(f"Exchange: {safe_exchange}")
 
-    # Hash the file incrementally. This provides exact duplicate-file
-    # detection without loading the entire PDF into memory.
-    document_hash = calculate_file_hash(file_path)
+    # Hash and register documents for normal callers.
+    #
+    # Production workers may receive a registry record that was
+    # created by the upload API before the job was queued. In that
+    # case, do not register the same document a second time.
+    if registry is None:
+        document_hash = calculate_file_hash(file_path)
 
-    registry = register_document(
-        document_name=safe_document_name,
-        document_hash=document_hash,
-        company_name=safe_company_name,
-        ticker=safe_ticker,
-        market=market,
-        exchange=safe_exchange,
-        country=country,
-        currency=safe_currency,
-        document_type=document_type,
-        report_type=report_type,
-        reporting_period=reporting_period,
-        fiscal_year=fiscal_year,
-        fiscal_quarter=fiscal_quarter,
-        fiscal_half=fiscal_half,
-        period_start=period_start,
-        period_end=period_end,
-        publication_date=publication_date,
-    )
+        registry = register_document(
+            document_name=safe_document_name,
+            document_hash=document_hash,
+            company_name=safe_company_name,
+            ticker=safe_ticker,
+            market=market,
+            exchange=safe_exchange,
+            country=country,
+            currency=safe_currency,
+            document_type=document_type,
+            report_type=report_type,
+            reporting_period=reporting_period,
+            fiscal_year=fiscal_year,
+            fiscal_quarter=fiscal_quarter,
+            fiscal_half=fiscal_half,
+            period_start=period_start,
+            period_end=period_end,
+            publication_date=publication_date,
+        )
+    else:
+        document_hash = registry.get("document_hash")
 
     document_id = registry["document_id"]
     registry_status = registry["status"]
