@@ -1,5 +1,8 @@
 import re
 
+from app.rag.financial_analysis_request import extract_metric_keys
+from app.rag.financial_metrics import get_metric
+
 
 def normalize_text(text: str) -> str:
     """Lowercase text and remove most punctuation for comparison."""
@@ -49,6 +52,59 @@ def exact_phrase_bonus(query: str, content: str) -> float:
     return bonus
 
 
+def financial_evidence_bonus(
+    query: str,
+    content: str,
+) -> float:
+    """
+    Reward chunks containing the requested financial metric
+    together with all explicit years requested by the user.
+    """
+
+    metric_keys = extract_metric_keys(query)
+
+    if not metric_keys:
+        return 0.0
+
+    query_years = set(
+        re.findall(r"\b20\d{2}\b", query)
+    )
+
+    if not query_years:
+        return 0.0
+
+    content_normalized = normalize_text(content)
+    content_years = set(
+        re.findall(r"\b20\d{2}\b", content)
+    )
+
+    if not query_years.issubset(content_years):
+        return 0.0
+
+    for metric_key in metric_keys:
+        metric = get_metric(metric_key)
+
+        aliases = (
+            metric.label,
+            *metric.aliases,
+        )
+
+        if any(
+            re.search(
+                r"(?<!\w)"
+                + re.escape(
+                    normalize_text(alias).strip()
+                )
+                + r"(?!\w)",
+                content_normalized,
+            )
+            for alias in aliases
+        ):
+            return 1.0
+
+    return 0.0
+
+
 def rerank_results(
     query: str,
     results: list[dict],
@@ -80,15 +136,22 @@ def rerank_results(
             result["content"],
         )
 
+        evidence_bonus = financial_evidence_bonus(
+            query,
+            result["content"],
+        )
+
         final_score = (
             0.55 * semantic_score
             + 0.30 * keyword_score
             + 0.15 * phrase_bonus
+            + 0.15 * evidence_bonus
         )
 
         updated_result = result.copy()
         updated_result["keyword_overlap"] = keyword_score
         updated_result["phrase_bonus"] = phrase_bonus
+        updated_result["evidence_bonus"] = evidence_bonus
         updated_result["final_score"] = final_score
 
         reranked.append(updated_result)

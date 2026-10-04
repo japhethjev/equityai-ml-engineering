@@ -26,6 +26,10 @@ ABSTENTION_TEXT = (
     "in the provided documents."
 )
 
+# Retrieve enough candidates for reranking while keeping
+# the final evidence set small and focused.
+RERANK_CANDIDATE_LIMIT = 20
+
 
 # =========================================================
 # CALCULATION INTENT CONTROL
@@ -329,7 +333,7 @@ def answer_question(
             retrieved = hybrid_search(
                 query=query,
                 query_embedding=query_embedding,
-                limit=5,
+                limit=RERANK_CANDIDATE_LIMIT,
                 document_ids=document_ids,
             )
 

@@ -2,7 +2,10 @@ from unittest.mock import patch
 
 import pytest
 
-from app.rag.rag_service import answer_question
+from app.rag.rag_service import (
+    RERANK_CANDIDATE_LIMIT,
+    answer_question,
+)
 
 
 SAMPLE_RESULTS = [
@@ -283,7 +286,7 @@ def test_answer_question_passes_scoped_document_ids_to_search(
     mock_hybrid_search.assert_called_once_with(
         query="What was AAPL revenue in Q2 2026?",
         query_embedding=[0.1, 0.2],
-        limit=5,
+        limit=RERANK_CANDIDATE_LIMIT,
         document_ids=[document_id],
     )
 
@@ -334,7 +337,7 @@ def test_answer_question_preserves_unrestricted_search(
     mock_hybrid_search.assert_called_once_with(
         query="What is the IPO offer price?",
         query_embedding=[0.1, 0.2],
-        limit=5,
+        limit=RERANK_CANDIDATE_LIMIT,
         document_ids=None,
     )
 
@@ -406,7 +409,7 @@ def test_comparison_passes_all_document_ids_to_search(
             "Q2 2025 and Q2 2026."
         ),
         query_embedding=[0.1, 0.2],
-        limit=5,
+        limit=RERANK_CANDIDATE_LIMIT,
         document_ids=[
             q2_2025_id,
             q2_2026_id,
