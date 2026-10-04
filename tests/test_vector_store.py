@@ -719,3 +719,163 @@ def test_get_document_chunks_requires_document_id():
         match="document_id is required",
     ):
         get_document_chunks(" ")
+
+
+@patch("app.rag.vector_store.get_connection")
+def test_list_documents_returns_ingestion_lifecycle(
+    mock_get_connection,
+):
+    from app.rag.vector_store import list_documents
+
+    queued_id = "11111111-1111-1111-1111-111111111111"
+    processing_id = "22222222-2222-2222-2222-222222222222"
+    completed_id = "33333333-3333-3333-3333-333333333333"
+    failed_id = "44444444-4444-4444-4444-444444444444"
+
+    rows = [
+        (
+            queued_id,
+            "queued_report.pdf",
+            "Queued Plc",
+            "QUE",
+            "LSE",
+            "UK",
+            "United Kingdom",
+            "GBP",
+            "annual",
+            2025,
+            None,
+            None,
+            date(2025, 1, 1),
+            date(2025, 12, 31),
+            date(2026, 3, 1),
+            "queued",
+            0,
+            None,
+            0,
+            None,
+            0,
+            None,
+            None,
+            None,
+        ),
+        (
+            processing_id,
+            "large_612_page_report.pdf",
+            "Large Report Plc",
+            "LRG",
+            "LSE",
+            "UK",
+            "United Kingdom",
+            "GBP",
+            "annual",
+            2025,
+            None,
+            None,
+            date(2025, 1, 1),
+            date(2025, 12, 31),
+            date(2026, 3, 15),
+            "processing",
+            347,
+            612,
+            2184,
+            None,
+            347,
+            None,
+            None,
+            None,
+        ),
+        (
+            completed_id,
+            "completed_612_page_report.pdf",
+            "Completed Plc",
+            "CMP",
+            "LSE",
+            "UK",
+            "United Kingdom",
+            "GBP",
+            "annual",
+            2025,
+            None,
+            None,
+            date(2025, 1, 1),
+            date(2025, 12, 31),
+            date(2026, 3, 20),
+            "completed",
+            612,
+            612,
+            3846,
+            3846,
+            612,
+            None,
+            None,
+            None,
+        ),
+        (
+            failed_id,
+            "failed_large_report.pdf",
+            "Failed Plc",
+            "FLD",
+            "LSE",
+            "UK",
+            "United Kingdom",
+            "GBP",
+            "annual",
+            2025,
+            None,
+            None,
+            date(2025, 1, 1),
+            date(2025, 12, 31),
+            date(2026, 3, 25),
+            "failed",
+            420,
+            700,
+            2600,
+            None,
+            420,
+            "Embedding provider unavailable",
+            None,
+            None,
+        ),
+    ]
+
+    connection_context, cursor = make_connection(rows)
+    mock_get_connection.return_value = connection_context
+
+    result = list_documents()
+
+    assert len(result) == 4
+
+    assert result[0]["status"] == "queued"
+    assert result[0]["processed_pages"] == 0
+    assert result[0]["total_pages"] is None
+
+    assert result[1]["status"] == "processing"
+    assert result[1]["processed_pages"] == 347
+    assert result[1]["total_pages"] == 612
+    assert result[1]["processed_chunks"] == 2184
+    assert result[1]["pages"] == 347
+    assert result[1]["chunks"] == 2184
+
+    assert result[2]["status"] == "completed"
+    assert result[2]["processed_pages"] == 612
+    assert result[2]["total_pages"] == 612
+    assert result[2]["processed_chunks"] == 3846
+    assert result[2]["total_chunks"] == 3846
+
+    assert result[3]["status"] == "failed"
+    assert result[3]["processed_pages"] == 420
+    assert result[3]["total_pages"] == 700
+    assert (
+        result[3]["error_message"]
+        == "Embedding provider unavailable"
+    )
+
+    cursor.execute.assert_called_once()
+    sql = cursor.execute.call_args.args[0]
+
+    assert "FROM documents" in sql
+    assert "ingestion_status" in sql
+    assert "processed_pages" in sql
+    assert "total_pages" in sql
+    assert "ORDER BY created_at DESC" in sql

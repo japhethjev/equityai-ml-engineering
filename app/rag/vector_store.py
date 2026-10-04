@@ -431,8 +431,11 @@ def hybrid_search(
 
 def list_documents() -> list[dict]:
     """
-    Return all documents currently stored in the
-    EquityAI knowledge base with page and chunk counts.
+    Return document registry state and ingestion progress.
+
+    The documents registry is authoritative for lifecycle state.
+    Chunk counts are reported from persisted ingestion progress so
+    queued and processing documents remain visible to administrators.
     """
 
     with get_connection() as connection:
@@ -440,12 +443,32 @@ def list_documents() -> list[dict]:
             cursor.execute(
                 """
                 SELECT
-                    document,
-                    COUNT(DISTINCT page) AS pages,
-                    COUNT(*) AS chunks
-                FROM document_chunks
-                GROUP BY document
-                ORDER BY document
+                    document_id,
+                    document_name,
+                    company_name,
+                    ticker,
+                    exchange,
+                    market,
+                    country,
+                    currency,
+                    report_type,
+                    fiscal_year,
+                    fiscal_quarter,
+                    fiscal_half,
+                    period_start,
+                    period_end,
+                    publication_date,
+                    ingestion_status,
+                    processed_pages,
+                    total_pages,
+                    processed_chunks,
+                    total_chunks,
+                    last_processed_page,
+                    error_message,
+                    created_at,
+                    updated_at
+                FROM documents
+                ORDER BY created_at DESC
                 """
             )
 
@@ -453,13 +476,56 @@ def list_documents() -> list[dict]:
 
     return [
         {
-            "document": row[0],
-            "pages": row[1],
-            "chunks": row[2],
+            "document_id": str(row[0]),
+            "document": row[1],
+            "company_name": row[2],
+            "ticker": row[3],
+            "exchange": row[4],
+            "market": row[5],
+            "country": row[6],
+            "currency": row[7],
+            "report_type": row[8],
+            "fiscal_year": row[9],
+            "fiscal_quarter": row[10],
+            "fiscal_half": row[11],
+            "period_start": (
+                row[12].isoformat()
+                if row[12] is not None
+                else None
+            ),
+            "period_end": (
+                row[13].isoformat()
+                if row[13] is not None
+                else None
+            ),
+            "publication_date": (
+                row[14].isoformat()
+                if row[14] is not None
+                else None
+            ),
+            "status": row[15],
+            "processed_pages": row[16] or 0,
+            "total_pages": row[17],
+            "processed_chunks": row[18] or 0,
+            "total_chunks": row[19],
+            "last_processed_page": row[20] or 0,
+            "error_message": row[21],
+            "created_at": (
+                row[22].isoformat()
+                if row[22] is not None
+                else None
+            ),
+            "updated_at": (
+                row[23].isoformat()
+                if row[23] is not None
+                else None
+            ),
+            # Backward-compatible fields for existing admin clients.
+            "pages": row[16] or 0,
+            "chunks": row[18] or 0,
         }
         for row in rows
     ]
-
 
 def delete_document(
     document_name: str,
