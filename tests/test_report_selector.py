@@ -209,3 +209,19 @@ def test_latest_half_year_report():
 
     assert result.latest is True
     assert result.report_type == "half_year"
+
+
+def test_annual_comparison_deduplicates_repeated_year_mentions():
+    results = parse_report_selections(
+        "According to HSBC Holdings plc Annual Report and Accounts "
+        "2025, what was profit before tax in 2025, and how did it "
+        "compare with 2024?"
+    )
+
+    assert len(results) == 2
+
+    assert results[0].report_type == "annual"
+    assert results[0].fiscal_year == 2025
+
+    assert results[1].report_type == "annual"
+    assert results[1].fiscal_year == 2024

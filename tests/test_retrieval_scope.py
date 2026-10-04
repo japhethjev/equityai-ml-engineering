@@ -365,3 +365,81 @@ def test_historical_request_does_not_use_standard_resolver(
 
     mock_resolve_historical.assert_called_once()
     mock_resolve_documents.assert_not_called()
+
+
+@patch(
+    "app.rag.retrieval_scope.resolve_documents"
+)
+@patch(
+    "app.rag.retrieval_scope.list_registered_companies"
+)
+def test_comparative_year_can_use_latest_annual_report(
+    mock_list_companies,
+    mock_resolve_documents,
+):
+    """
+    A current annual report may contain comparative prior-year
+    figures. A missing separate prior-year filing must therefore
+    not prevent retrieval from the available current filing.
+    """
+
+    mock_list_companies.return_value = [APPLE]
+
+    def resolve_by_year(**kwargs):
+        if kwargs["fiscal_year"] == 2025:
+            return [APPLE_FY2025]
+
+        if kwargs["fiscal_year"] == 2024:
+            return []
+
+        return []
+
+    mock_resolve_documents.side_effect = resolve_by_year
+
+    scope = resolve_retrieval_scope(
+        "Compare AAPL revenue in 2025 with 2024"
+    )
+
+    assert scope["filtered"] is True
+    assert scope["document_ids"] == [
+        APPLE_FY2025["document_id"]
+    ]
+
+
+@patch(
+    "app.rag.retrieval_scope.resolve_documents"
+)
+@patch(
+    "app.rag.retrieval_scope.list_registered_companies"
+)
+def test_comparative_years_use_both_filings_when_available(
+    mock_list_companies,
+    mock_resolve_documents,
+):
+    """
+    When dedicated filings exist for both comparative years,
+    retrieval should use both, newest year first.
+    """
+
+    mock_list_companies.return_value = [APPLE]
+
+    def resolve_by_year(**kwargs):
+        if kwargs["fiscal_year"] == 2025:
+            return [APPLE_FY2025]
+
+        if kwargs["fiscal_year"] == 2024:
+            return [APPLE_FY2024]
+
+        return []
+
+    mock_resolve_documents.side_effect = resolve_by_year
+
+    scope = resolve_retrieval_scope(
+        "Compare AAPL annual revenue in 2025 with 2024"
+    )
+
+    assert scope["filtered"] is True
+    assert scope["document_ids"] == [
+        APPLE_FY2025["document_id"],
+        APPLE_FY2024["document_id"],
+    ]

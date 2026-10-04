@@ -214,9 +214,13 @@ def parse_report_selections(
         text,
     )
 
-    years = re.findall(
-        r"\b(?:fy\s*)?(20\d{2})\b",
-        text,
+    years = list(
+        dict.fromkeys(
+            re.findall(
+                r"\b(?:fy\s*)?(20\d{2})\b",
+                text,
+            )
+        )
     )
 
     if quarter_match and len(years) >= 2:
