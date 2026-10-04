@@ -397,7 +397,7 @@ def test_comparative_year_can_use_latest_annual_report(
     mock_resolve_documents.side_effect = resolve_by_year
 
     scope = resolve_retrieval_scope(
-        "Compare AAPL revenue in 2025 with 2024"
+        "Compare AAPL annual revenue in 2025 with 2024"
     )
 
     assert scope["filtered"] is True

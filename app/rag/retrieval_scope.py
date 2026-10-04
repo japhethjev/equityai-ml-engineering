@@ -168,16 +168,16 @@ def resolve_retrieval_scope(
         if selection.latest:
             matches = matches[:1]
 
-        if (
-            has_explicit_period_constraint
-            and not matches
-        ):
-            raise ReportNotFoundError(
-                "The requested financial report is not "
-                "available in the document registry."
-            )
-
         documents.extend(matches)
+
+    if (
+        has_explicit_period_constraint
+        and not documents
+    ):
+        raise ReportNotFoundError(
+            "The requested financial report is not "
+            "available in the document registry."
+        )
 
     # Deduplicate while preserving registry order.
     unique_documents = []
