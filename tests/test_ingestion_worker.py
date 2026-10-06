@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -652,3 +653,168 @@ def test_run_worker_requires_positive_reconciliation_interval():
         run_worker(
             reconciliation_interval_seconds=0
         )
+
+
+def make_staged_upload_message():
+    return {
+        "version": 1,
+        "message_type": "staged_upload",
+        "upload_id": "upload-123",
+        "bucket": "equityai-documents",
+        "object_key": "staging/upload-123/report.pdf",
+        "document_name": "report.pdf",
+        "metadata": {
+            "company_name": "Example Plc",
+            "ticker": "EXM",
+            "exchange": "LSE",
+            "market": "UK",
+            "country": "UK",
+            "currency": "GBP",
+            "document_type": "financial_report",
+            "report_type": "annual",
+            "fiscal_year": 2025,
+            "period_end": "2025-12-31",
+        },
+    }
+
+
+@patch(
+    "app.workers.ingestion_worker.dispatch_document_ingestion"
+)
+@patch(
+    "app.workers.ingestion_worker.download_document_file"
+)
+def test_process_staged_upload_message(
+    mock_download,
+    mock_dispatch,
+):
+    from app.workers.ingestion_worker import (
+        process_staged_upload_message,
+    )
+
+    mock_dispatch.return_value = {
+        "document_id": "doc-123",
+        "document_hash": "hash-123",
+        "status": "queued",
+        "storage": {
+            "bucket": "equityai-documents",
+            "object_key": "documents/doc-123/report.pdf",
+        },
+    }
+
+    result = process_staged_upload_message(
+        make_staged_upload_message()
+    )
+
+    mock_download.assert_called_once()
+    mock_dispatch.assert_called_once()
+
+    prepare_kwargs = mock_dispatch.call_args.kwargs
+
+    assert prepare_kwargs["document_name"] == "report.pdf"
+    assert prepare_kwargs["company_name"] == "Example Plc"
+    assert prepare_kwargs["exchange"] == "LSE"
+    assert prepare_kwargs["market"] == "UK"
+    assert prepare_kwargs["fiscal_year"] == 2025
+
+    assert result["status"] == "queued"
+
+
+@patch(
+    "app.workers.ingestion_worker.dispatch_document_ingestion"
+)
+@patch(
+    "app.workers.ingestion_worker.download_document_file"
+)
+def test_staged_upload_failure_preserves_staging_object(
+    mock_download,
+    mock_dispatch,
+):
+    from app.workers.ingestion_worker import (
+        process_staged_upload_message,
+    )
+
+    mock_dispatch.side_effect = RuntimeError(
+        "Document dispatch failed"
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Document dispatch failed",
+    ):
+        process_staged_upload_message(
+            make_staged_upload_message()
+        )
+
+    mock_download.assert_called_once()
+    mock_dispatch.assert_called_once()
+
+
+def test_staged_upload_rejects_wrong_object_key():
+    from app.workers.ingestion_worker import (
+        process_staged_upload_message,
+    )
+
+    message = make_staged_upload_message()
+    message["object_key"] = (
+        "staging/different-upload/report.pdf"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="does not belong to upload_id",
+    ):
+        process_staged_upload_message(message)
+
+
+@patch(
+    "app.workers.ingestion_worker.process_staged_upload_message"
+)
+@patch(
+    "app.workers.ingestion_worker.process_ingestion_message"
+)
+def test_run_worker_once_routes_staged_upload(
+    mock_process_ingestion,
+    mock_process_staged,
+):
+    from unittest.mock import MagicMock
+
+    from app.workers.ingestion_worker import (
+        run_worker_once,
+    )
+
+    mock_sqs = MagicMock()
+
+    mock_sqs.receive_message.return_value = {
+        "Messages": [
+            {
+                "Body": json.dumps(
+                    make_staged_upload_message()
+                ),
+                "ReceiptHandle": "receipt-staged-123",
+            }
+        ]
+    }
+
+    mock_process_staged.return_value = {
+        "document_id": "doc-123",
+        "status": "queued",
+    }
+
+    handled = run_worker_once(
+        sqs_client=mock_sqs,
+        queue_url="queue-url",
+    )
+
+    mock_process_staged.assert_called_once_with(
+        make_staged_upload_message()
+    )
+
+    mock_process_ingestion.assert_not_called()
+
+    mock_sqs.delete_message.assert_called_once_with(
+        QueueUrl="queue-url",
+        ReceiptHandle="receipt-staged-123",
+    )
+
+    assert handled == 1

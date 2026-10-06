@@ -756,3 +756,432 @@ def test_upload_converts_blank_ticker_and_exchange_to_none(
 
     assert kwargs["ticker"] is None
     assert kwargs["exchange"] is None
+
+
+@patch("app.api.main.create_document_upload_url")
+@patch("app.api.main.uuid.uuid4")
+def test_create_document_upload_url_endpoint(
+    mock_uuid4,
+    mock_create_document_upload_url,
+):
+    mock_uuid4.return_value.hex = "12345678123456781234567812345678"
+
+    mock_create_document_upload_url.return_value = {
+        "bucket": "equityai-documents",
+        "object_key": (
+            "staging/12345678123456781234567812345678/annual-report.pdf"
+        ),
+        "upload_url": (
+            "https://example.test/presigned-upload"
+        ),
+        "expires_in": 900,
+    }
+
+    response = client.post(
+        "/documents/upload-url",
+        headers=AUTH_HEADERS,
+        json={
+            "filename": "annual-report.pdf",
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "upload_id": "12345678123456781234567812345678",
+        "filename": "annual-report.pdf",
+        "upload_url": (
+            "https://example.test/presigned-upload"
+        ),
+        "expires_in": 900,
+    }
+
+    assert "bucket" not in response.json()
+    assert "object_key" not in response.json()
+
+    mock_create_document_upload_url.assert_called_once_with(
+        upload_id="12345678123456781234567812345678",
+        filename="annual-report.pdf",
+    )
+
+
+@patch("app.api.main.create_document_upload_url")
+def test_create_document_upload_url_requires_auth(
+    mock_create_document_upload_url,
+):
+    response = client.post(
+        "/documents/upload-url",
+        json={
+            "filename": "annual-report.pdf",
+        },
+    )
+
+    assert response.status_code == 401
+    mock_create_document_upload_url.assert_not_called()
+
+
+@patch("app.api.main.create_document_upload_url")
+def test_create_document_upload_url_rejects_non_pdf(
+    mock_create_document_upload_url,
+):
+    response = client.post(
+        "/documents/upload-url",
+        headers=AUTH_HEADERS,
+        json={
+            "filename": "financial-results.xlsx",
+        },
+    )
+
+    assert response.status_code == 400
+
+    assert response.json() == {
+        "detail": "Only PDF files are supported."
+    }
+
+    mock_create_document_upload_url.assert_not_called()
+
+
+@patch("app.api.main.create_document_upload_url")
+def test_create_document_upload_url_strips_path(
+    mock_create_document_upload_url,
+):
+    mock_create_document_upload_url.return_value = {
+        "bucket": "equityai-documents",
+        "object_key": "staging/upload123/report.pdf",
+        "upload_url": "signed-url",
+        "expires_in": 900,
+    }
+
+    response = client.post(
+        "/documents/upload-url",
+        headers=AUTH_HEADERS,
+        json={
+            "filename": "../../report.pdf",
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert response.json()["filename"] == "report.pdf"
+
+    kwargs = mock_create_document_upload_url.call_args.kwargs
+    assert kwargs["filename"] == "report.pdf"
+
+
+@patch("app.api.main.create_document_upload_url")
+def test_create_document_upload_url_handles_storage_failure(
+    mock_create_document_upload_url,
+):
+    mock_create_document_upload_url.side_effect = RuntimeError(
+        "S3 unavailable"
+    )
+
+    response = client.post(
+        "/documents/upload-url",
+        headers=AUTH_HEADERS,
+        json={
+            "filename": "annual-report.pdf",
+        },
+    )
+
+    assert response.status_code == 503
+
+    assert response.json() == {
+        "detail": "Unable to prepare document upload."
+    }
+
+
+def make_upload_confirm_payload():
+    return {
+        "upload_id": "12345678123456781234567812345678",
+        "filename": "annual-report.pdf",
+        "company_name": "Example Plc",
+        "ticker": " EXM ",
+        "exchange": " LSE ",
+        "market": " UK ",
+        "country": " UK ",
+        "currency": " GBP ",
+        "report_type": " ANNUAL ",
+        "fiscal_year": 2025,
+        "period_start": "2025-01-01",
+        "period_end": "2025-12-31",
+        "reporting_period": "FY2025",
+    }
+
+
+@patch("app.api.main.enqueue_staged_upload_job")
+@patch("app.api.main.document_object_exists")
+@patch("app.api.main.get_document_bucket")
+def test_confirm_document_upload_queues_staged_job(
+    mock_get_bucket,
+    mock_object_exists,
+    mock_enqueue,
+):
+    mock_get_bucket.return_value = "equityai-documents"
+    mock_object_exists.return_value = True
+    mock_enqueue.return_value = {
+        "message_id": "message-123",
+    }
+
+    response = client.post(
+        "/documents/upload-confirm",
+        headers=AUTH_HEADERS,
+        json=make_upload_confirm_payload(),
+    )
+
+    assert response.status_code == 202
+
+    assert response.json() == {
+        "upload_id": "12345678123456781234567812345678",
+        "filename": "annual-report.pdf",
+        "status": "queued",
+        "message_id": "message-123",
+    }
+
+    mock_object_exists.assert_called_once_with(
+        bucket="equityai-documents",
+        object_key=(
+            "staging/12345678123456781234567812345678/annual-report.pdf"
+        ),
+    )
+
+    kwargs = mock_enqueue.call_args.kwargs
+
+    assert kwargs["upload_id"] == "12345678123456781234567812345678"
+    assert kwargs["bucket"] == "equityai-documents"
+    assert (
+        kwargs["object_key"]
+        == "staging/12345678123456781234567812345678/annual-report.pdf"
+    )
+    assert kwargs["document_name"] == "annual-report.pdf"
+
+    metadata = kwargs["metadata"]
+
+    assert metadata["company_name"] == "Example Plc"
+    assert metadata["ticker"] == "EXM"
+    assert metadata["exchange"] == "LSE"
+    assert metadata["market"] == "UK"
+    assert metadata["country"] == "UK"
+    assert metadata["currency"] == "GBP"
+    assert metadata["document_type"] == "financial_report"
+    assert metadata["report_type"] == "annual"
+    assert metadata["fiscal_year"] == 2025
+
+
+@patch("app.api.main.enqueue_staged_upload_job")
+@patch("app.api.main.document_object_exists")
+@patch("app.api.main.get_document_bucket")
+def test_confirm_document_upload_requires_auth(
+    mock_get_bucket,
+    mock_object_exists,
+    mock_enqueue,
+):
+    response = client.post(
+        "/documents/upload-confirm",
+        json=make_upload_confirm_payload(),
+    )
+
+    assert response.status_code == 401
+    mock_get_bucket.assert_not_called()
+    mock_object_exists.assert_not_called()
+    mock_enqueue.assert_not_called()
+
+
+@patch("app.api.main.enqueue_staged_upload_job")
+@patch("app.api.main.document_object_exists")
+@patch("app.api.main.get_document_bucket")
+def test_confirm_document_upload_requires_staged_object(
+    mock_get_bucket,
+    mock_object_exists,
+    mock_enqueue,
+):
+    mock_get_bucket.return_value = "equityai-documents"
+    mock_object_exists.return_value = False
+
+    response = client.post(
+        "/documents/upload-confirm",
+        headers=AUTH_HEADERS,
+        json=make_upload_confirm_payload(),
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            "The staged PDF was not found. "
+            "Upload the file before confirming it."
+        )
+    }
+
+    mock_enqueue.assert_not_called()
+
+
+@patch("app.api.main.enqueue_staged_upload_job")
+@patch("app.api.main.document_object_exists")
+@patch("app.api.main.get_document_bucket")
+def test_confirm_document_upload_handles_s3_failure(
+    mock_get_bucket,
+    mock_object_exists,
+    mock_enqueue,
+):
+    mock_get_bucket.return_value = "equityai-documents"
+    mock_object_exists.side_effect = RuntimeError(
+        "S3 unavailable"
+    )
+
+    response = client.post(
+        "/documents/upload-confirm",
+        headers=AUTH_HEADERS,
+        json=make_upload_confirm_payload(),
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Unable to verify staged document upload."
+    }
+
+    mock_enqueue.assert_not_called()
+
+
+@patch("app.api.main.enqueue_staged_upload_job")
+@patch("app.api.main.document_object_exists")
+@patch("app.api.main.get_document_bucket")
+def test_confirm_document_upload_handles_queue_failure(
+    mock_get_bucket,
+    mock_object_exists,
+    mock_enqueue,
+):
+    mock_get_bucket.return_value = "equityai-documents"
+    mock_object_exists.return_value = True
+    mock_enqueue.side_effect = RuntimeError(
+        "SQS unavailable"
+    )
+
+    response = client.post(
+        "/documents/upload-confirm",
+        headers=AUTH_HEADERS,
+        json=make_upload_confirm_payload(),
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Unable to queue staged document upload."
+    }
+
+
+@patch("app.api.main.enqueue_staged_upload_job")
+@patch("app.api.main.document_object_exists")
+@patch("app.api.main.get_document_bucket")
+def test_confirm_document_upload_rejects_invalid_metadata(
+    mock_get_bucket,
+    mock_object_exists,
+    mock_enqueue,
+):
+    payload = make_upload_confirm_payload()
+    payload["report_type"] = "quarterly"
+    payload["fiscal_quarter"] = None
+
+    response = client.post(
+        "/documents/upload-confirm",
+        headers=AUTH_HEADERS,
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": (
+            "Quarterly reports require "
+            "fiscal_quarter 1, 2, 3 or 4."
+        )
+    }
+
+    mock_get_bucket.assert_not_called()
+    mock_object_exists.assert_not_called()
+    mock_enqueue.assert_not_called()
+
+
+@patch("app.api.main.enqueue_staged_upload_job")
+@patch("app.api.main.document_object_exists")
+@patch("app.api.main.get_document_bucket")
+def test_confirm_document_upload_derives_safe_object_key(
+    mock_get_bucket,
+    mock_object_exists,
+    mock_enqueue,
+):
+    mock_get_bucket.return_value = "equityai-documents"
+    mock_object_exists.return_value = True
+    mock_enqueue.return_value = {
+        "message_id": "message-123",
+    }
+
+    payload = make_upload_confirm_payload()
+    payload["filename"] = "../../annual-report.pdf"
+
+    response = client.post(
+        "/documents/upload-confirm",
+        headers=AUTH_HEADERS,
+        json=payload,
+    )
+
+    assert response.status_code == 202
+
+    mock_object_exists.assert_called_once_with(
+        bucket="equityai-documents",
+        object_key=(
+            "staging/12345678123456781234567812345678/annual-report.pdf"
+        ),
+    )
+
+
+@patch("app.api.main.enqueue_staged_upload_job")
+@patch("app.api.main.document_object_exists")
+@patch("app.api.main.get_document_bucket")
+def test_confirm_document_upload_rejects_invalid_upload_id(
+    mock_get_bucket,
+    mock_object_exists,
+    mock_enqueue,
+):
+    payload = make_upload_confirm_payload()
+    payload["upload_id"] = "../not-a-valid-upload-id"
+
+    response = client.post(
+        "/documents/upload-confirm",
+        headers=AUTH_HEADERS,
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Invalid upload_id."
+    }
+
+    mock_get_bucket.assert_not_called()
+    mock_object_exists.assert_not_called()
+    mock_enqueue.assert_not_called()
+
+
+@patch("app.api.main.create_document_upload_url")
+def test_create_document_upload_url_strips_windows_path(
+    mock_create_document_upload_url,
+):
+    mock_create_document_upload_url.return_value = {
+        "bucket": "equityai-documents",
+        "object_key": "unused-in-public-response",
+        "upload_url": "signed-url",
+        "expires_in": 900,
+    }
+
+    response = client.post(
+        "/documents/upload-url",
+        headers=AUTH_HEADERS,
+        json={
+            "filename": (
+                r"C:\Users\Admin\Downloads\annual-report.pdf"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["filename"] == "annual-report.pdf"
+
+    kwargs = mock_create_document_upload_url.call_args.kwargs
+    assert kwargs["filename"] == "annual-report.pdf"

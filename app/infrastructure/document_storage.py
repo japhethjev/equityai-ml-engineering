@@ -19,6 +19,18 @@ def get_document_bucket() -> str:
     return bucket
 
 
+def normalize_document_filename(filename: str) -> str:
+    """Return a basename safe for use in document S3 object keys."""
+
+    normalized = filename.strip().replace("\\", "/")
+    safe_filename = Path(normalized).name
+
+    if not safe_filename:
+        raise ValueError("filename is required")
+
+    return safe_filename
+
+
 def build_document_key(
     document_id: str,
     filename: str,
@@ -30,10 +42,7 @@ def build_document_key(
     Path.name prevents caller-supplied directory traversal.
     """
 
-    safe_filename = Path(filename).name
-
-    if not safe_filename:
-        raise ValueError("filename is required")
+    safe_filename = normalize_document_filename(filename)
 
     if not document_id.strip():
         raise ValueError("document_id is required")
@@ -79,6 +88,49 @@ def upload_document_file(
     return {
         "bucket": bucket,
         "object_key": object_key,
+    }
+
+
+def create_document_upload_url(
+    upload_id: str,
+    filename: str,
+    expires_in: int = 900,
+) -> dict:
+    """
+    Create a short-lived presigned S3 PUT URL for an admin PDF upload.
+
+    The object is staged first. Registration, hashing and ingestion
+    dispatch occur only after the backend confirms the staged upload.
+    """
+    safe_filename = normalize_document_filename(filename)
+
+    if Path(safe_filename).suffix.lower() != ".pdf":
+        raise ValueError("Only PDF files are supported.")
+
+    if not upload_id.strip():
+        raise ValueError("upload_id is required")
+
+    bucket = get_document_bucket()
+    object_key = (
+        f"staging/{upload_id.strip()}/{safe_filename}"
+    )
+
+    s3 = boto3.client("s3")
+    upload_url = s3.generate_presigned_url(
+        "put_object",
+        Params={
+            "Bucket": bucket,
+            "Key": object_key,
+            "ContentType": "application/pdf",
+        },
+        ExpiresIn=expires_in,
+    )
+
+    return {
+        "bucket": bucket,
+        "object_key": object_key,
+        "upload_url": upload_url,
+        "expires_in": expires_in,
     }
 
 
@@ -155,3 +207,27 @@ def document_object_exists(
         raise
 
     return True
+
+
+def delete_document_object(
+    bucket: str,
+    object_key: str,
+) -> None:
+    """
+    Delete a document object from S3.
+
+    Used to remove temporary staging objects only after the worker has
+    safely prepared the document or resolved it as a duplicate.
+    """
+    if not bucket.strip():
+        raise ValueError("bucket is required")
+
+    if not object_key.strip():
+        raise ValueError("object_key is required")
+
+    s3 = boto3.client("s3")
+
+    s3.delete_object(
+        Bucket=bucket.strip(),
+        Key=object_key.strip(),
+    )

@@ -291,3 +291,183 @@ def test_document_object_exists_validates_arguments():
             bucket="equityai-documents",
             object_key="",
         )
+
+
+def test_create_document_upload_url(monkeypatch):
+    from app.infrastructure.document_storage import (
+        create_document_upload_url,
+    )
+
+    monkeypatch.setenv(
+        "DOCUMENTS_S3_BUCKET",
+        "equityai-documents",
+    )
+
+    mock_s3 = MagicMock()
+    mock_s3.generate_presigned_url.return_value = (
+        "https://example.test/presigned-upload"
+    )
+
+    with patch(
+        "app.infrastructure.document_storage.boto3.client",
+        return_value=mock_s3,
+    ):
+        result = create_document_upload_url(
+            upload_id="upload-123",
+            filename="annual-report.pdf",
+            expires_in=900,
+        )
+
+    mock_s3.generate_presigned_url.assert_called_once_with(
+        "put_object",
+        Params={
+            "Bucket": "equityai-documents",
+            "Key": "staging/upload-123/annual-report.pdf",
+            "ContentType": "application/pdf",
+        },
+        ExpiresIn=900,
+    )
+
+    assert result == {
+        "bucket": "equityai-documents",
+        "object_key": "staging/upload-123/annual-report.pdf",
+        "upload_url": "https://example.test/presigned-upload",
+        "expires_in": 900,
+    }
+
+
+def test_create_document_upload_url_strips_directory_components(
+    monkeypatch,
+):
+    from app.infrastructure.document_storage import (
+        create_document_upload_url,
+    )
+
+    monkeypatch.setenv(
+        "DOCUMENTS_S3_BUCKET",
+        "equityai-documents",
+    )
+
+    mock_s3 = MagicMock()
+    mock_s3.generate_presigned_url.return_value = "signed-url"
+
+    with patch(
+        "app.infrastructure.document_storage.boto3.client",
+        return_value=mock_s3,
+    ):
+        result = create_document_upload_url(
+            upload_id="upload-456",
+            filename="../../report.pdf",
+        )
+
+    assert result["object_key"] == (
+        "staging/upload-456/report.pdf"
+    )
+
+
+def test_create_document_upload_url_rejects_non_pdf(monkeypatch):
+    from app.infrastructure.document_storage import (
+        create_document_upload_url,
+    )
+
+    monkeypatch.setenv(
+        "DOCUMENTS_S3_BUCKET",
+        "equityai-documents",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Only PDF files are supported",
+    ):
+        create_document_upload_url(
+            upload_id="upload-789",
+            filename="report.xlsx",
+        )
+
+
+def test_create_document_upload_url_requires_upload_id(monkeypatch):
+    from app.infrastructure.document_storage import (
+        create_document_upload_url,
+    )
+
+    monkeypatch.setenv(
+        "DOCUMENTS_S3_BUCKET",
+        "equityai-documents",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="upload_id is required",
+    ):
+        create_document_upload_url(
+            upload_id="",
+            filename="report.pdf",
+        )
+
+
+@patch(
+    "app.infrastructure.document_storage.boto3.client"
+)
+def test_delete_document_object(
+    mock_boto_client,
+):
+    mock_s3 = MagicMock()
+    mock_boto_client.return_value = mock_s3
+
+    from app.infrastructure.document_storage import (
+        delete_document_object,
+    )
+
+    delete_document_object(
+        bucket="equityai-documents",
+        object_key="staging/upload123/report.pdf",
+    )
+
+    mock_boto_client.assert_called_once_with("s3")
+
+    mock_s3.delete_object.assert_called_once_with(
+        Bucket="equityai-documents",
+        Key="staging/upload123/report.pdf",
+    )
+
+
+def test_delete_document_object_requires_bucket():
+    from app.infrastructure.document_storage import (
+        delete_document_object,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="bucket",
+    ):
+        delete_document_object(
+            bucket="",
+            object_key="staging/upload123/report.pdf",
+        )
+
+
+def test_delete_document_object_requires_object_key():
+    from app.infrastructure.document_storage import (
+        delete_document_object,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="object_key",
+    ):
+        delete_document_object(
+            bucket="equityai-documents",
+            object_key="",
+        )
+
+
+def test_normalize_document_filename_strips_windows_path():
+    from app.infrastructure.document_storage import (
+        normalize_document_filename,
+    )
+
+    result = normalize_document_filename(
+        r"C:\Users\Admin\Downloads\annual-report.pdf"
+    )
+
+    assert result == "annual-report.pdf"

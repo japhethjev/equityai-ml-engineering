@@ -130,3 +130,102 @@ def test_enqueue_ingestion_job(
     assert body["document_name"] == "report.pdf"
 
     assert result["message_id"] == "message-123"
+
+
+def test_build_staged_upload_message():
+    from app.infrastructure.ingestion_queue import (
+        build_staged_upload_message,
+    )
+
+    message = build_staged_upload_message(
+        upload_id="upload-123",
+        bucket="equityai-documents",
+        object_key="staging/upload-123/report.pdf",
+        document_name="report.pdf",
+        metadata={
+            "company_name": "Example Plc",
+            "fiscal_year": 2025,
+        },
+    )
+
+    assert message == {
+        "version": 1,
+        "message_type": "staged_upload",
+        "upload_id": "upload-123",
+        "bucket": "equityai-documents",
+        "object_key": "staging/upload-123/report.pdf",
+        "document_name": "report.pdf",
+        "metadata": {
+            "company_name": "Example Plc",
+            "fiscal_year": 2025,
+        },
+    }
+
+
+def test_build_staged_upload_message_rejects_wrong_key():
+    from app.infrastructure.ingestion_queue import (
+        build_staged_upload_message,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="does not belong to upload_id",
+    ):
+        build_staged_upload_message(
+            upload_id="upload-123",
+            bucket="equityai-documents",
+            object_key="staging/another-upload/report.pdf",
+            document_name="report.pdf",
+        )
+
+
+@patch(
+    "app.infrastructure.ingestion_queue.boto3.client"
+)
+def test_enqueue_staged_upload_job(
+    mock_boto_client,
+    monkeypatch,
+):
+    from app.infrastructure.ingestion_queue import (
+        enqueue_staged_upload_job,
+    )
+
+    monkeypatch.setenv(
+        "INGESTION_QUEUE_URL",
+        "https://sqs.example/queue",
+    )
+
+    mock_sqs = MagicMock()
+    mock_sqs.send_message.return_value = {
+        "MessageId": "staged-message-123",
+    }
+    mock_boto_client.return_value = mock_sqs
+
+    result = enqueue_staged_upload_job(
+        upload_id="upload-123",
+        bucket="equityai-documents",
+        object_key="staging/upload-123/report.pdf",
+        document_name="report.pdf",
+        metadata={
+            "company_name": "Example Plc",
+        },
+    )
+
+    mock_sqs.send_message.assert_called_once()
+
+    kwargs = mock_sqs.send_message.call_args.kwargs
+    body = json.loads(kwargs["MessageBody"])
+
+    assert kwargs["QueueUrl"] == (
+        "https://sqs.example/queue"
+    )
+    assert body["version"] == 1
+    assert body["message_type"] == "staged_upload"
+    assert body["upload_id"] == "upload-123"
+    assert body["object_key"] == (
+        "staging/upload-123/report.pdf"
+    )
+
+    assert result["message_id"] == (
+        "staged-message-123"
+    )

@@ -24,6 +24,15 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 
+from app.infrastructure.document_storage import (
+    create_document_upload_url,
+    document_object_exists,
+    get_document_bucket,
+    normalize_document_filename,
+)
+from app.infrastructure.ingestion_queue import (
+    enqueue_staged_upload_job,
+)
 from app.observability import get_rag_metrics
 from app.rag.ingestion_dispatch import (
     dispatch_document_ingestion,
@@ -134,6 +143,29 @@ def verify_api_key(
 
 class QuestionRequest(BaseModel):
     question: str
+
+
+class DocumentUploadUrlRequest(BaseModel):
+    filename: str
+
+
+class DocumentUploadConfirmRequest(BaseModel):
+    upload_id: str
+    filename: str
+    company_name: str
+    ticker: str | None = None
+    exchange: str | None = None
+    market: str | None = None
+    country: str
+    currency: str
+    report_type: str
+    fiscal_year: int
+    fiscal_quarter: int | None = None
+    fiscal_half: int | None = None
+    period_start: str | None = None
+    period_end: str
+    publication_date: str | None = None
+    reporting_period: str | None = None
 
 
 # ---------------------------------------------------------
@@ -372,6 +404,311 @@ def ask(
                 "unavailable."
             ),
         )
+
+
+# ---------------------------------------------------------
+# Create direct document upload URL
+# ---------------------------------------------------------
+
+@app.post("/documents/upload-url")
+def create_upload_url(
+    payload: DocumentUploadUrlRequest,
+    _: None = Depends(verify_api_key),
+):
+    """
+    Create a short-lived presigned S3 URL for direct admin PDF upload.
+
+    The PDF is staged in S3 so large financial reports do not pass
+    through the frontend serverless gateway.
+    """
+    try:
+        original_filename = normalize_document_filename(
+            payload.filename
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if Path(original_filename).suffix.lower() != ".pdf":
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported.",
+        )
+
+    upload_id = uuid.uuid4().hex
+
+    try:
+        result = create_document_upload_url(
+            upload_id=upload_id,
+            filename=original_filename,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to create document upload URL: %s",
+            original_filename,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to prepare document upload.",
+        )
+
+    return {
+        "upload_id": upload_id,
+        "filename": original_filename,
+        "upload_url": result["upload_url"],
+        "expires_in": result["expires_in"],
+    }
+
+
+# ---------------------------------------------------------
+# Confirm direct document upload
+# ---------------------------------------------------------
+
+@app.post(
+    "/documents/upload-confirm",
+    status_code=202,
+)
+def confirm_document_upload(
+    payload: DocumentUploadConfirmRequest,
+    _: None = Depends(verify_api_key),
+):
+    """
+    Confirm a PDF already uploaded directly to staging S3 and queue
+    durable asynchronous intake.
+
+    Hashing, registration, parsing and embedding happen in workers.
+    """
+    upload_id = payload.upload_id.strip()
+
+    try:
+        parsed_upload_id = uuid.UUID(upload_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid upload_id.",
+        )
+
+    if parsed_upload_id.hex != upload_id.lower():
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid upload_id.",
+        )
+
+    upload_id = parsed_upload_id.hex
+
+    try:
+        original_filename = normalize_document_filename(
+            payload.filename
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if Path(original_filename).suffix.lower() != ".pdf":
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported.",
+        )
+
+    normalized_report_type = payload.report_type.strip().lower()
+
+    allowed_report_types = {
+        "annual",
+        "quarterly",
+        "half_year",
+        "other",
+    }
+
+    if normalized_report_type not in allowed_report_types:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "report_type must be one of: "
+                "annual, quarterly, half_year, other."
+            ),
+        )
+
+    company_name = payload.company_name.strip()
+
+    if not company_name:
+        raise HTTPException(
+            status_code=400,
+            detail="company_name is required.",
+        )
+
+    ticker = (
+        payload.ticker.strip()
+        if payload.ticker and payload.ticker.strip()
+        else None
+    )
+
+    exchange = (
+        payload.exchange.strip()
+        if payload.exchange and payload.exchange.strip()
+        else None
+    )
+
+    market = (
+        payload.market.strip()
+        if payload.market and payload.market.strip()
+        else None
+    )
+
+    country = payload.country.strip()
+
+    if not country:
+        raise HTTPException(
+            status_code=400,
+            detail="country is required.",
+        )
+
+    currency = payload.currency.strip()
+
+    if not currency:
+        raise HTTPException(
+            status_code=400,
+            detail="currency is required.",
+        )
+
+    if payload.fiscal_year < 1900 or payload.fiscal_year > 2200:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid fiscal_year.",
+        )
+
+    if normalized_report_type == "quarterly":
+        if payload.fiscal_quarter not in {1, 2, 3, 4}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Quarterly reports require "
+                    "fiscal_quarter 1, 2, 3 or 4."
+                ),
+            )
+
+        if payload.fiscal_half is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "fiscal_half must not be supplied "
+                    "for quarterly reports."
+                ),
+            )
+
+    elif normalized_report_type == "half_year":
+        if payload.fiscal_half not in {1, 2}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Half-year reports require "
+                    "fiscal_half 1 or 2."
+                ),
+            )
+
+        if payload.fiscal_quarter is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "fiscal_quarter must not be supplied "
+                    "for half-year reports."
+                ),
+            )
+
+    else:
+        if payload.fiscal_quarter is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "fiscal_quarter may only be supplied "
+                    "for quarterly reports."
+                ),
+            )
+
+        if payload.fiscal_half is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "fiscal_half may only be supplied "
+                    "for half-year reports."
+                ),
+            )
+
+    object_key = (
+        f"staging/{upload_id}/{original_filename}"
+    )
+
+    try:
+        bucket = get_document_bucket()
+
+        staged_object_exists = document_object_exists(
+            bucket=bucket,
+            object_key=object_key,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to verify staged document upload: %s",
+            upload_id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to verify staged document upload.",
+        )
+
+    if not staged_object_exists:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The staged PDF was not found. "
+                "Upload the file before confirming it."
+            ),
+        )
+
+    metadata = {
+        "company_name": company_name,
+        "ticker": ticker,
+        "exchange": exchange,
+        "market": market,
+        "country": country,
+        "currency": currency,
+        "document_type": "financial_report",
+        "report_type": normalized_report_type,
+        "fiscal_year": payload.fiscal_year,
+        "fiscal_quarter": payload.fiscal_quarter,
+        "fiscal_half": payload.fiscal_half,
+        "period_start": payload.period_start,
+        "period_end": payload.period_end,
+        "publication_date": payload.publication_date,
+        "reporting_period": payload.reporting_period,
+    }
+
+    try:
+        queue_result = enqueue_staged_upload_job(
+            upload_id=upload_id,
+            bucket=bucket,
+            object_key=object_key,
+            document_name=original_filename,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to queue staged document upload: %s",
+            upload_id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to queue staged document upload.",
+        )
+
+    return {
+        "upload_id": upload_id,
+        "filename": original_filename,
+        "status": "queued",
+        "message_id": queue_result["message_id"],
+    }
 
 
 # ---------------------------------------------------------

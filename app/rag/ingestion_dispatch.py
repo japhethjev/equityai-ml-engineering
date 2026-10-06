@@ -6,7 +6,6 @@ from app.infrastructure.ingestion_queue import (
 from app.rag.ingestion_preparation import (
     prepare_document_ingestion,
 )
-from app.rag.vector_store import fail_document
 
 
 def dispatch_document_ingestion(
@@ -32,8 +31,8 @@ def dispatch_document_ingestion(
     """
     Persist an uploaded document and dispatch its ingestion job.
 
-    If queue publication fails after registration/storage, mark the
-    registry record failed so it is not stranded as processing.
+    If queue publication fails after registration/storage, leave the
+    registry record queued so its dispatch lease can be reclaimed safely.
     """
 
     prepared = prepare_document_ingestion(
@@ -93,14 +92,9 @@ def dispatch_document_ingestion(
             metadata=metadata,
         )
 
-    except Exception as exc:
-        fail_document(
-            document_id=document_id,
-            error_message=(
-                "Failed to dispatch ingestion job: "
-                f"{type(exc).__name__}: {exc}"
-            ),
-        )
+    except Exception:
+        # Keep the document queued. Its dispatch lease allows the
+        # reconciler or a later redelivery to reclaim publication.
         raise
 
     return {

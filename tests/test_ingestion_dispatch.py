@@ -8,9 +8,6 @@ from app.rag.ingestion_dispatch import (
 
 
 @patch(
-    "app.rag.ingestion_dispatch.fail_document"
-)
-@patch(
     "app.rag.ingestion_dispatch.enqueue_ingestion_job"
 )
 @patch(
@@ -19,7 +16,6 @@ from app.rag.ingestion_dispatch import (
 def test_dispatch_new_document(
     mock_prepare,
     mock_enqueue,
-    mock_fail,
 ):
     mock_prepare.return_value = {
         "document_id": "doc-123",
@@ -82,12 +78,8 @@ def test_dispatch_new_document(
     )
     assert kwargs["metadata"]["fiscal_year"] == 2025
 
-    mock_fail.assert_not_called()
 
 
-@patch(
-    "app.rag.ingestion_dispatch.fail_document"
-)
 @patch(
     "app.rag.ingestion_dispatch.enqueue_ingestion_job"
 )
@@ -97,7 +89,6 @@ def test_dispatch_new_document(
 def test_completed_duplicate_is_not_queued(
     mock_prepare,
     mock_enqueue,
-    mock_fail,
 ):
     mock_prepare.return_value = {
         "document_id": "doc-existing",
@@ -120,22 +111,17 @@ def test_completed_duplicate_is_not_queued(
     assert result["status"] == "already_ingested"
 
     mock_enqueue.assert_not_called()
-    mock_fail.assert_not_called()
 
 
-@patch(
-    "app.rag.ingestion_dispatch.fail_document"
-)
 @patch(
     "app.rag.ingestion_dispatch.enqueue_ingestion_job"
 )
 @patch(
     "app.rag.ingestion_dispatch.prepare_document_ingestion"
 )
-def test_queue_failure_marks_document_failed(
+def test_queue_failure_leaves_document_queued(
     mock_prepare,
     mock_enqueue,
-    mock_fail,
 ):
     mock_prepare.return_value = {
         "document_id": "doc-123",
@@ -168,20 +154,8 @@ def test_queue_failure_marks_document_failed(
             document_name="report.pdf",
         )
 
-    mock_fail.assert_called_once()
-
-    kwargs = mock_fail.call_args.kwargs
-
-    assert kwargs["document_id"] == "doc-123"
-    assert "Failed to dispatch ingestion job" in (
-        kwargs["error_message"]
-    )
-    assert "SQS unavailable" in kwargs["error_message"]
 
 
-@patch(
-    "app.rag.ingestion_dispatch.fail_document"
-)
 @patch(
     "app.rag.ingestion_dispatch.enqueue_ingestion_job"
 )
@@ -191,7 +165,6 @@ def test_queue_failure_marks_document_failed(
 def test_queued_duplicate_is_not_queued_again(
     mock_prepare,
     mock_enqueue,
-    mock_fail,
 ):
     mock_prepare.return_value = {
         "document_id": "doc-queued",
@@ -215,4 +188,3 @@ def test_queued_duplicate_is_not_queued_again(
     assert result["status"] == "already_queued"
 
     mock_enqueue.assert_not_called()
-    mock_fail.assert_not_called()

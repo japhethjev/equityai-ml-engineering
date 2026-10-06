@@ -97,3 +97,83 @@ def enqueue_ingestion_job(
         "queue_url": queue_url,
         "message": message,
     }
+
+
+def build_staged_upload_message(
+    *,
+    upload_id: str,
+    bucket: str,
+    object_key: str,
+    document_name: str,
+    metadata: dict | None = None,
+) -> dict:
+    """
+    Build a durable intake message for a PDF already staged in S3.
+
+    Hashing and document registration deliberately happen in the worker,
+    not in the API request.
+    """
+    if not upload_id.strip():
+        raise ValueError("upload_id is required")
+
+    if not bucket.strip():
+        raise ValueError("bucket is required")
+
+    if not object_key.strip():
+        raise ValueError("object_key is required")
+
+    if not document_name.strip():
+        raise ValueError("document_name is required")
+
+    if not object_key.strip().startswith(
+        f"staging/{upload_id.strip()}/"
+    ):
+        raise ValueError(
+            "object_key does not belong to upload_id"
+        )
+
+    return {
+        "version": 1,
+        "message_type": "staged_upload",
+        "upload_id": upload_id.strip(),
+        "bucket": bucket.strip(),
+        "object_key": object_key.strip(),
+        "document_name": document_name.strip(),
+        "metadata": metadata or {},
+    }
+
+
+def enqueue_staged_upload_job(
+    *,
+    upload_id: str,
+    bucket: str,
+    object_key: str,
+    document_name: str,
+    metadata: dict | None = None,
+) -> dict:
+    """Publish a staged-document intake job to SQS."""
+    queue_url = get_ingestion_queue_url()
+
+    message = build_staged_upload_message(
+        upload_id=upload_id,
+        bucket=bucket,
+        object_key=object_key,
+        document_name=document_name,
+        metadata=metadata,
+    )
+
+    sqs = boto3.client("sqs")
+
+    response = sqs.send_message(
+        QueueUrl=queue_url,
+        MessageBody=json.dumps(
+            message,
+            separators=(",", ":"),
+        ),
+    )
+
+    return {
+        "message_id": response["MessageId"],
+        "queue_url": queue_url,
+        "message": message,
+    }

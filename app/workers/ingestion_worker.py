@@ -7,6 +7,9 @@ from app.infrastructure.document_storage import (
     download_document_file,
 )
 from app.rag.ingest import ingest_document
+from app.rag.ingestion_dispatch import (
+    dispatch_document_ingestion,
+)
 from app.rag.vector_store import (
     claim_document_for_ingestion,
 )
@@ -155,6 +158,107 @@ def process_ingestion_message(message: dict) -> dict:
         )
 
 
+
+def process_staged_upload_message(message: dict) -> dict:
+    """
+    Prepare one PDF uploaded directly to S3 by an authenticated admin.
+
+    The worker downloads the staged object, calculates its trusted hash
+    through the existing preparation pipeline, registers/deduplicates it,
+    persists any new document to final S3 storage, and leaves the
+    staging object available for safe SQS redelivery until lifecycle expiry.
+    """
+    if not isinstance(message, dict):
+        raise ValueError(
+            "Staged upload message must be a dictionary."
+        )
+
+    if message.get("version") != 1:
+        raise ValueError(
+            "Unsupported staged upload message version."
+        )
+
+    if message.get("message_type") != "staged_upload":
+        raise ValueError(
+            "Unsupported staged upload message type."
+        )
+
+    required_fields = (
+        "upload_id",
+        "bucket",
+        "object_key",
+        "document_name",
+    )
+
+    for field in required_fields:
+        value = message.get(field)
+
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field} is required")
+
+    upload_id = message["upload_id"].strip()
+    bucket = message["bucket"].strip()
+    object_key = message["object_key"].strip()
+    document_name = Path(
+        message["document_name"]
+    ).name
+
+    if not object_key.startswith(
+        f"staging/{upload_id}/"
+    ):
+        raise ValueError(
+            "object_key does not belong to upload_id"
+        )
+
+    metadata = message.get("metadata") or {}
+
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            "metadata must be a dictionary"
+        )
+
+    with tempfile.TemporaryDirectory(
+        prefix="equityai-staged-upload-"
+    ) as temp_directory:
+        local_path = (
+            Path(temp_directory)
+            / document_name
+        )
+
+        download_document_file(
+            bucket=bucket,
+            object_key=object_key,
+            destination_path=str(local_path),
+        )
+
+        dispatched = dispatch_document_ingestion(
+            str(local_path),
+            document_name=document_name,
+            company_name=metadata.get("company_name"),
+            ticker=metadata.get("ticker"),
+            market=metadata.get("market"),
+            exchange=metadata.get("exchange"),
+            country=metadata.get("country"),
+            currency=metadata.get("currency"),
+            document_type=metadata.get("document_type"),
+            report_type=metadata.get("report_type"),
+            reporting_period=metadata.get(
+                "reporting_period"
+            ),
+            fiscal_year=metadata.get("fiscal_year"),
+            fiscal_quarter=metadata.get(
+                "fiscal_quarter"
+            ),
+            fiscal_half=metadata.get("fiscal_half"),
+            period_start=metadata.get("period_start"),
+            period_end=metadata.get("period_end"),
+            publication_date=metadata.get(
+                "publication_date"
+            ),
+        )
+
+        return dispatched
+
 def run_worker_once(
     *,
     sqs_client=None,
@@ -217,9 +321,14 @@ def run_worker_once(
                     VisibilityTimeout=900,
                 )
 
-            result = process_ingestion_message(
-                body
-            )
+            if body.get("message_type") == "staged_upload":
+                result = process_staged_upload_message(
+                    body
+                )
+            else:
+                result = process_ingestion_message(
+                    body
+                )
 
             # Another worker still owns an active processing
             # lease. Leave this SQS message unacknowledged so it
