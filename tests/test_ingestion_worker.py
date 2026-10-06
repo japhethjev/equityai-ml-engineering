@@ -818,3 +818,213 @@ def test_run_worker_once_routes_staged_upload(
     )
 
     assert handled == 1
+
+
+def test_visibility_heartbeat_extends_immediately_and_periodically():
+    from unittest.mock import MagicMock
+
+    from app.workers.ingestion_worker import (
+        SQSVisibilityHeartbeat,
+    )
+
+    sqs = MagicMock()
+
+    heartbeat = SQSVisibilityHeartbeat(
+        sqs_client=sqs,
+        queue_url="queue-url",
+        receipt_handle="receipt-123",
+        visibility_timeout_seconds=30,
+        heartbeat_seconds=0.01,
+    )
+
+    heartbeat.start()
+
+    import time
+    deadline = time.monotonic() + 1.0
+
+    while (
+        sqs.change_message_visibility.call_count < 2
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+
+    heartbeat.stop()
+
+    assert sqs.change_message_visibility.call_count >= 2
+
+    for call in sqs.change_message_visibility.call_args_list:
+        assert call.kwargs == {
+            "QueueUrl": "queue-url",
+            "ReceiptHandle": "receipt-123",
+            "VisibilityTimeout": 30,
+        }
+
+
+def test_visibility_heartbeat_stop_prevents_further_renewal():
+    from unittest.mock import MagicMock
+
+    from app.workers.ingestion_worker import (
+        SQSVisibilityHeartbeat,
+    )
+
+    sqs = MagicMock()
+
+    heartbeat = SQSVisibilityHeartbeat(
+        sqs_client=sqs,
+        queue_url="queue-url",
+        receipt_handle="receipt-123",
+        visibility_timeout_seconds=30,
+        heartbeat_seconds=0.01,
+    )
+
+    heartbeat.start()
+
+    import time
+    deadline = time.monotonic() + 1.0
+
+    while (
+        sqs.change_message_visibility.call_count < 2
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+
+    heartbeat.stop()
+    count_after_stop = sqs.change_message_visibility.call_count
+
+    time.sleep(0.03)
+
+    assert (
+        sqs.change_message_visibility.call_count
+        == count_after_stop
+    )
+
+
+def test_visibility_heartbeat_rejects_invalid_intervals():
+    from unittest.mock import MagicMock
+
+    from app.workers.ingestion_worker import (
+        SQSVisibilityHeartbeat,
+    )
+
+    sqs = MagicMock()
+
+    with pytest.raises(
+        ValueError,
+        match="heartbeat_seconds must be less",
+    ):
+        SQSVisibilityHeartbeat(
+            sqs_client=sqs,
+            queue_url="queue-url",
+            receipt_handle="receipt-123",
+            visibility_timeout_seconds=30,
+            heartbeat_seconds=30,
+        )
+
+
+@patch(
+    "app.workers.ingestion_worker."
+    "process_ingestion_message"
+)
+@patch(
+    "app.workers.ingestion_worker."
+    "SQSVisibilityHeartbeat"
+)
+def test_worker_stops_heartbeat_before_delete(
+    mock_heartbeat_class,
+    mock_process,
+):
+    from unittest.mock import MagicMock, call
+
+    from app.workers.ingestion_worker import (
+        run_worker_once,
+    )
+
+    events = MagicMock()
+    heartbeat = mock_heartbeat_class.return_value
+
+    heartbeat.start.side_effect = lambda: events(
+        "heartbeat-start"
+    )
+    heartbeat.stop.side_effect = lambda: events(
+        "heartbeat-stop"
+    )
+
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [
+            {
+                "Body": (
+                    '{"version":1,'
+                    '"document_id":"doc-123"}'
+                ),
+                "ReceiptHandle": "receipt-123",
+            }
+        ]
+    }
+
+    mock_process.return_value = {
+        "document_id": "doc-123",
+        "status": "completed",
+    }
+
+    sqs.delete_message.side_effect = lambda **kwargs: events(
+        "delete"
+    )
+
+    handled = run_worker_once(
+        sqs_client=sqs,
+        queue_url="queue-url",
+    )
+
+    assert handled == 1
+    assert events.call_args_list == [
+        call("heartbeat-start"),
+        call("heartbeat-stop"),
+        call("delete"),
+    ]
+
+
+@patch(
+    "app.workers.ingestion_worker."
+    "process_ingestion_message"
+)
+@patch(
+    "app.workers.ingestion_worker."
+    "SQSVisibilityHeartbeat"
+)
+def test_worker_stops_heartbeat_on_processing_failure(
+    mock_heartbeat_class,
+    mock_process,
+):
+    from unittest.mock import MagicMock
+
+    from app.workers.ingestion_worker import (
+        run_worker_once,
+    )
+
+    sqs = MagicMock()
+    sqs.receive_message.return_value = {
+        "Messages": [
+            {
+                "Body": (
+                    '{"version":1,'
+                    '"document_id":"doc-123"}'
+                ),
+                "ReceiptHandle": "receipt-123",
+            }
+        ]
+    }
+
+    mock_process.side_effect = RuntimeError(
+        "processing failed"
+    )
+
+    handled = run_worker_once(
+        sqs_client=sqs,
+        queue_url="queue-url",
+    )
+
+    assert handled == 0
+    mock_heartbeat_class.return_value.start.assert_called_once()
+    mock_heartbeat_class.return_value.stop.assert_called_once()
+    sqs.delete_message.assert_not_called()

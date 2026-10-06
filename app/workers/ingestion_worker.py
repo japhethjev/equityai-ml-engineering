@@ -1,6 +1,8 @@
 """Worker logic for asynchronous EquityAI document ingestion."""
 
+import logging
 import tempfile
+import threading
 from pathlib import Path
 
 from app.infrastructure.document_storage import (
@@ -22,6 +24,87 @@ REQUIRED_MESSAGE_FIELDS = (
     "object_key",
     "document_name",
 )
+
+SQS_VISIBILITY_TIMEOUT_SECONDS = 900
+SQS_VISIBILITY_HEARTBEAT_SECONDS = 300
+
+logger = logging.getLogger("equityai-ingestion-worker")
+
+
+class SQSVisibilityHeartbeat:
+    """Keep one in-flight SQS message invisible during long processing."""
+
+    def __init__(
+        self,
+        *,
+        sqs_client,
+        queue_url: str,
+        receipt_handle: str,
+        visibility_timeout_seconds: int = (
+            SQS_VISIBILITY_TIMEOUT_SECONDS
+        ),
+        heartbeat_seconds: float = (
+            SQS_VISIBILITY_HEARTBEAT_SECONDS
+        ),
+    ) -> None:
+        if visibility_timeout_seconds <= 0:
+            raise ValueError(
+                "visibility_timeout_seconds must be positive"
+            )
+
+        if heartbeat_seconds <= 0:
+            raise ValueError(
+                "heartbeat_seconds must be positive"
+            )
+
+        if heartbeat_seconds >= visibility_timeout_seconds:
+            raise ValueError(
+                "heartbeat_seconds must be less than "
+                "visibility_timeout_seconds"
+            )
+
+        self.sqs_client = sqs_client
+        self.queue_url = queue_url
+        self.receipt_handle = receipt_handle
+        self.visibility_timeout_seconds = (
+            visibility_timeout_seconds
+        )
+        self.heartbeat_seconds = heartbeat_seconds
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="sqs-visibility-heartbeat",
+            daemon=True,
+        )
+
+    def _extend_visibility(self) -> None:
+        self.sqs_client.change_message_visibility(
+            QueueUrl=self.queue_url,
+            ReceiptHandle=self.receipt_handle,
+            VisibilityTimeout=self.visibility_timeout_seconds,
+        )
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(
+            self.heartbeat_seconds
+        ):
+            try:
+                self._extend_visibility()
+            except Exception:
+                logger.exception(
+                    "SQS visibility heartbeat renewal failed"
+                )
+
+    def start(self) -> None:
+        # Protect the message immediately before processing starts.
+        self._extend_visibility()
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+        if self._thread.is_alive():
+            self._thread.join()
 
 
 def validate_ingestion_message(message: dict) -> None:
@@ -314,21 +397,28 @@ def run_worker_once(
                 sqs_message["Body"]
             )
 
-            if receipt_handle:
-                sqs_client.change_message_visibility(
-                    QueueUrl=queue_url,
-                    ReceiptHandle=receipt_handle,
-                    VisibilityTimeout=900,
-                )
+            heartbeat = None
 
-            if body.get("message_type") == "staged_upload":
-                result = process_staged_upload_message(
-                    body
+            if receipt_handle:
+                heartbeat = SQSVisibilityHeartbeat(
+                    sqs_client=sqs_client,
+                    queue_url=queue_url,
+                    receipt_handle=receipt_handle,
                 )
-            else:
-                result = process_ingestion_message(
-                    body
-                )
+                heartbeat.start()
+
+            try:
+                if body.get("message_type") == "staged_upload":
+                    result = process_staged_upload_message(
+                        body
+                    )
+                else:
+                    result = process_ingestion_message(
+                        body
+                    )
+            finally:
+                if heartbeat is not None:
+                    heartbeat.stop()
 
             # Another worker still owns an active processing
             # lease. Leave this SQS message unacknowledged so it
