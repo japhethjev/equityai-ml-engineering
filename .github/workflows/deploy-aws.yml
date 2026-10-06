@@ -204,7 +204,93 @@ jobs:
 
           echo "Database migrations completed successfully."
 
-      - name: Deploy new task definition to ECS service
+      - name: Download current ingestion worker task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition equityai-ingestion-worker \
+            --query taskDefinition \
+            > worker-task-definition.json
+
+      - name: Prepare ingestion worker task definition
+        env:
+          IMAGE_URI: ${{ steps.build-image.outputs.image }}
+        run: |
+          python - <<'PYTHON'
+          import json
+          import os
+
+          path = "worker-task-definition.json"
+
+          with open(path) as f:
+              task = json.load(f)
+
+          for field in [
+              "taskDefinitionArn",
+              "revision",
+              "status",
+              "requiresAttributes",
+              "compatibilities",
+              "registeredAt",
+              "registeredBy",
+          ]:
+              task.pop(field, None)
+
+          containers = task.get("containerDefinitions", [])
+
+          worker = next(
+              (
+                  container
+                  for container in containers
+                  if container.get("name")
+                  == "equityai-ingestion-worker"
+              ),
+              None,
+          )
+
+          if worker is None:
+              raise RuntimeError(
+                  "equityai-ingestion-worker container not found"
+              )
+
+          worker["image"] = os.environ["IMAGE_URI"]
+
+          with open(
+              "worker-task-definition-deploy.json",
+              "w",
+          ) as f:
+              json.dump(task, f, indent=2)
+          PYTHON
+
+      - name: Register ingestion worker task definition
+        id: register-worker-task
+        run: |
+          WORKER_TASK_DEFINITION_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://worker-task-definition-deploy.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task_definition_arn=$WORKER_TASK_DEFINITION_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered worker: $WORKER_TASK_DEFINITION_ARN"
+
+      - name: Deploy ingestion worker
+        env:
+          WORKER_TASK_DEFINITION_ARN: ${{ steps.register-worker-task.outputs.task_definition_arn }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service equityai-ingestion-worker-service-0s739p5o \
+            --task-definition "$WORKER_TASK_DEFINITION_ARN" \
+            --force-new-deployment
+
+          echo "Waiting for ingestion worker service to become stable..."
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services equityai-ingestion-worker-service-0s739p5o
+
+          echo "Ingestion worker deployment completed successfully"
+
+      - name: Deploy API
         env:
           TASK_DEFINITION_ARN: ${{ steps.register-task.outputs.task_definition_arn }}
         run: |
@@ -214,10 +300,10 @@ jobs:
             --task-definition "$TASK_DEFINITION_ARN" \
             --force-new-deployment
 
-          echo "Waiting for ECS service to become stable..."
+          echo "Waiting for API service to become stable..."
 
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
             --services "$ECS_SERVICE"
 
-          echo "ECS deployment completed successfully"
+          echo "API deployment completed successfully"
