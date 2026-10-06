@@ -878,13 +878,14 @@ def fail_document(
 
 
 def resolve_documents(
-    ticker: str,
+    ticker: str | None = None,
     exchange: str | None = None,
     report_type: str | None = None,
     fiscal_year: int | None = None,
     fiscal_quarter: int | None = None,
     fiscal_half: int | None = None,
     current_only: bool = True,
+    company_name: str | None = None,
 ) -> list[dict]:
     """
     Resolve financial-report metadata to registry documents.
@@ -896,17 +897,21 @@ def resolve_documents(
     Multiple documents may intentionally be returned.
     """
 
-    normalized_ticker = ticker.strip().upper()
+    normalized_ticker = (ticker or "").strip().upper()
+    normalized_company_name = (company_name or "").strip()
 
-    if not normalized_ticker:
-        raise ValueError("ticker is required")
+    if not normalized_ticker and not normalized_company_name:
+        raise ValueError("ticker or company_name is required")
 
-    conditions = [
-        "UPPER(ticker) = %s",
-        "ingestion_status = 'completed'",
-    ]
+    conditions = ["ingestion_status = 'completed'"]
+    parameters = []
 
-    parameters = [normalized_ticker]
+    if normalized_ticker:
+        conditions.insert(0, "UPPER(ticker) = %s")
+        parameters.append(normalized_ticker)
+    else:
+        conditions.insert(0, "LOWER(company_name) = LOWER(%s)")
+        parameters.append(normalized_company_name)
 
     if exchange:
         conditions.append("UPPER(exchange) = %s")

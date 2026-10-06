@@ -68,6 +68,7 @@ def test_exact_quarter_resolves_document_id(
     mock_resolve_documents.assert_called_once_with(
         ticker="AAPL",
         exchange="NASDAQ",
+        company_name="Apple Inc.",
         report_type="quarterly",
         fiscal_year=2026,
         fiscal_quarter=2,
@@ -443,3 +444,52 @@ def test_comparative_years_use_both_filings_when_available(
         APPLE_FY2025["document_id"],
         APPLE_FY2024["document_id"],
     ]
+
+
+@patch(
+    "app.rag.retrieval_scope.resolve_documents"
+)
+@patch(
+    "app.rag.retrieval_scope.list_registered_companies"
+)
+def test_tickerless_company_resolves_documents_by_company_name(
+    mock_list_companies,
+    mock_resolve_documents,
+):
+    barclays = {
+        "company_name": "Barclays Bank Plc",
+        "ticker": None,
+        "exchange": "LSE",
+        "market": "UK",
+        "country": "UK",
+    }
+
+    document = {
+        "document_id": "barclays-2025-document",
+        "document_name": "Barclays-PLC-Annual-Report-2025.pdf",
+        "company_name": "Barclays Bank Plc",
+        "ticker": None,
+        "exchange": "LSE",
+        "report_type": "annual",
+        "fiscal_year": 2025,
+    }
+
+    mock_list_companies.return_value = [barclays]
+    mock_resolve_documents.return_value = [document]
+
+    scope = resolve_retrieval_scope(
+        "What was Barclays PLC profit before tax in 2025?"
+    )
+
+    assert scope["filtered"] is True
+    assert scope["company"]["company_name"] == "Barclays Bank Plc"
+    assert scope["document_ids"] == [
+        "barclays-2025-document"
+    ]
+
+    mock_resolve_documents.assert_called_once()
+
+    kwargs = mock_resolve_documents.call_args.kwargs
+    assert kwargs["ticker"] is None
+    assert kwargs["company_name"] == "Barclays Bank Plc"
+    assert kwargs["exchange"] == "LSE"

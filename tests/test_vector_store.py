@@ -242,17 +242,6 @@ def test_resolve_documents_no_match_returns_empty_list(
     assert results == []
 
 
-def test_resolve_documents_requires_ticker():
-    try:
-        resolve_documents(ticker="   ")
-    except ValueError as exc:
-        assert "ticker is required" in str(exc)
-    else:
-        raise AssertionError(
-            "Expected empty ticker to be rejected"
-        )
-
-
 @patch("app.rag.vector_store.get_connection")
 def test_resolve_documents_orders_by_financial_report_chronology(
     mock_get_connection,
@@ -879,3 +868,54 @@ def test_list_documents_returns_ingestion_lifecycle(
     assert "processed_pages" in sql
     assert "total_pages" in sql
     assert "ORDER BY created_at DESC" in sql
+
+
+@patch("app.rag.vector_store.get_connection")
+def test_resolve_documents_supports_tickerless_company_name(
+    mock_get_connection,
+):
+    connection_context, cursor = make_connection(
+        [sample_row()]
+    )
+    mock_get_connection.return_value = connection_context
+
+    results = resolve_documents(
+        ticker=None,
+        company_name="Barclays Bank Plc",
+        exchange="LSE",
+        report_type="annual",
+        fiscal_year=2025,
+    )
+
+    assert len(results) == 1
+
+    sql = cursor.execute.call_args.args[0]
+    params = cursor.execute.call_args.args[1]
+
+    assert "LOWER(company_name) = LOWER(%s)" in sql
+    assert "UPPER(ticker) = %s" not in sql
+    assert "UPPER(exchange) = %s" in sql
+    assert "LOWER(report_type) = %s" in sql
+    assert "fiscal_year = %s" in sql
+
+    assert params == (
+        "Barclays Bank Plc",
+        "LSE",
+        "annual",
+        2025,
+    )
+
+
+def test_resolve_documents_requires_ticker_or_company_name():
+    try:
+        resolve_documents(
+            ticker=None,
+            company_name="   ",
+        )
+    except ValueError as exc:
+        assert "ticker or company_name is required" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected missing ticker and company_name "
+            "to be rejected"
+        )

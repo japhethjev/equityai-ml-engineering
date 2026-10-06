@@ -154,8 +154,9 @@ def resolve_retrieval_scope(
 
     for selection in selections:
         matches = resolve_documents(
-            ticker=company["ticker"],
+            ticker=company.get("ticker"),
             exchange=company.get("exchange"),
+            company_name=company.get("company_name"),
             report_type=selection.report_type,
             fiscal_year=selection.fiscal_year,
             fiscal_quarter=selection.fiscal_quarter,
