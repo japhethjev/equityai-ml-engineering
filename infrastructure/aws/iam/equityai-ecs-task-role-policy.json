@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EquityAIDocumentStorage",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::equityai-production-documents-009910376113/documents/*"
+    },
+    {
+      "Sid": "EquityAIStagedDocumentStorage",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::equityai-production-documents-009910376113/staging/*"
+    },
+    {
+      "Sid": "EquityAIIngestionQueue",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility"
+      ],
+      "Resource": "arn:aws:sqs:eu-west-2:009910376113:equityai-document-ingestion"
+    }
+  ]
+}
