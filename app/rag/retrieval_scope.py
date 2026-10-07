@@ -1,5 +1,6 @@
 from app.rag.company_selector import (
     resolve_company_from_question,
+    resolve_companies_from_question,
 )
 from app.rag.historical_selector import (
     parse_historical_selection,
@@ -43,10 +44,20 @@ def resolve_retrieval_scope(
 
     companies = list_registered_companies()
 
-    company = resolve_company_from_question(
-        question,
-        companies,
+    requested_companies = (
+        resolve_companies_from_question(
+            question,
+            companies,
+        )
     )
+
+    if len(requested_companies) >= 2:
+        company = None
+    else:
+        company = resolve_company_from_question(
+            question,
+            companies,
+        )
 
     selections = parse_report_selections(
         question
@@ -75,6 +86,90 @@ def resolve_retrieval_scope(
         has_explicit_period_constraint
         or has_historical_constraint
     )
+
+    # -----------------------------------------------------
+    # Multi-company explicit-period resolution
+    # -----------------------------------------------------
+
+    if len(requested_companies) >= 2:
+        if historical_selection is not None:
+            raise ValueError(
+                "Multi-company historical-window retrieval "
+                "is not supported yet."
+            )
+
+        documents = []
+
+        for requested_company in requested_companies:
+            for selection in selections:
+                matches = resolve_documents(
+                    ticker=requested_company.get("ticker"),
+                    exchange=requested_company.get("exchange"),
+                    company_name=requested_company.get(
+                        "company_name"
+                    ),
+                    report_type=selection.report_type,
+                    fiscal_year=selection.fiscal_year,
+                    fiscal_quarter=selection.fiscal_quarter,
+                    fiscal_half=selection.fiscal_half,
+                    current_only=True,
+                )
+
+                if selection.latest:
+                    matches = matches[:1]
+
+                documents.extend(matches)
+
+        if has_explicit_period_constraint:
+            resolved_company_names = {
+                document.get("company_name")
+                for document in documents
+            }
+
+            missing_companies = [
+                requested_company.get("company_name")
+                for requested_company in requested_companies
+                if requested_company.get("company_name")
+                not in resolved_company_names
+            ]
+
+            if missing_companies:
+                raise ReportNotFoundError(
+                    "Financial reports are not available for "
+                    "all requested companies: "
+                    + ", ".join(missing_companies)
+                )
+
+        unique_documents = []
+        seen_ids = set()
+
+        for document in documents:
+            document_id = document["document_id"]
+
+            if document_id in seen_ids:
+                continue
+
+            seen_ids.add(document_id)
+            unique_documents.append(document)
+
+        document_ids = [
+            document["document_id"]
+            for document in unique_documents
+        ]
+
+        return {
+            "company": None,
+            "companies": requested_companies,
+            "selections": selections,
+            "historical_selection": None,
+            "documents": unique_documents,
+            "document_ids": document_ids,
+            "filtered": True,
+            "historical": False,
+            "requested_periods": None,
+            "available_periods": None,
+            "period_type": None,
+        }
 
     if company is None and has_period_constraint:
         raise MissingCompanyError(

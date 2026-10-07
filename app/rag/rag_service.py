@@ -294,6 +294,13 @@ def answer_question(
                 "document_ids"
             ]
 
+            requested_companies = (
+                retrieval_scope.get("companies") or []
+            )
+            multi_company_comparison = (
+                len(requested_companies) >= 2
+            )
+
     except Exception as error:
         record_error(
             "scope_resolution",
@@ -365,10 +372,16 @@ def answer_question(
         )
         raise
 
+    evidence_limit = (
+        max(3, len(document_ids))
+        if document_ids
+        else 3
+    )
+
     top_results = select_balanced_evidence(
         ranked,
         document_ids=document_ids,
-        limit=3,
+        limit=evidence_limit,
     )
 
     # =====================================================
@@ -625,6 +638,28 @@ If CALCULATION PERMISSION is ALLOWED:
 - Clearly distinguish the calculated result from a directly
   reported figure.
 
+
+MULTI-COMPANY COMPARISON CONTROL:
+
+{"ENABLED" if multi_company_comparison else "DISABLED"}
+
+When ENABLED:
+- Treat every requested company as a separate evidence subject.
+- Never use one company's evidence to answer for another company.
+- Every reported figure must be supported by that company's evidence.
+- Do not silently omit any requested company.
+- Present the results first as a concise Markdown comparison table.
+- Include Company, Period, Requested Metric(s), Source Document, and Page.
+- Preserve the currency, units, scale, and terminology of each source.
+- State material comparability limitations where currencies, units,
+  accounting bases, or definitions differ.
+- After the table, provide a brief evidence-grounded comparative analysis.
+- Do not calculate metrics unless CALCULATION PERMISSION is ALLOWED.
+- If evidence is insufficient, apply the Stage 1 abstention rules rather
+  than filling a company's result from another company's evidence.
+
+When DISABLED:
+- Follow the normal concise answer format above.
 
 USER QUESTION:
 

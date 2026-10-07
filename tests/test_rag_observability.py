@@ -497,3 +497,177 @@ def test_comparison_uses_balanced_evidence_selection(
         document_ids=document_ids,
         limit=3,
     )
+
+
+@patch("app.rag.rag_service.log_rag_error")
+@patch("app.rag.rag_service.select_balanced_evidence")
+@patch("app.rag.rag_service.rerank_results")
+@patch("app.rag.rag_service.hybrid_search")
+@patch("app.rag.rag_service.embed_text")
+@patch("app.rag.rag_service.resolve_retrieval_scope")
+def test_multi_company_evidence_limit_scales_with_documents(
+    mock_resolve_retrieval_scope,
+    mock_embed_text,
+    mock_hybrid_search,
+    mock_rerank_results,
+    mock_select_balanced_evidence,
+    mock_log_rag_error,
+):
+    document_ids = [
+        f"00000000-0000-0000-0000-{number:012d}"
+        for number in range(1, 6)
+    ]
+
+    mock_resolve_retrieval_scope.return_value = {
+        "company": None,
+        "companies": [
+            {"company_name": f"Company {number}"}
+            for number in range(1, 6)
+        ],
+        "selections": [],
+        "documents": [],
+        "document_ids": document_ids,
+        "filtered": True,
+    }
+
+    mock_embed_text.return_value = [0.1, 0.2]
+
+    retrieved = [
+        {
+            "document": f"company-{number}.pdf",
+            "document_id": document_id,
+            "page": 1,
+            "chunk": 1,
+            "content": f"Company {number} evidence",
+            "semantic_similarity": 0.9,
+        }
+        for number, document_id in enumerate(
+            document_ids,
+            start=1,
+        )
+    ]
+
+    mock_hybrid_search.return_value = retrieved
+    mock_rerank_results.return_value = retrieved
+
+    error = RuntimeError("Stop after dynamic selection")
+    mock_select_balanced_evidence.side_effect = error
+
+    with pytest.raises(
+        RuntimeError,
+        match="Stop after dynamic selection",
+    ):
+        answer_question(
+            "Compare Company 1, Company 2, Company 3, "
+            "Company 4 and Company 5.",
+            request_id="multi-company-limit-test",
+        )
+
+    mock_select_balanced_evidence.assert_called_once_with(
+        retrieved,
+        document_ids=document_ids,
+        limit=5,
+    )
+
+
+@patch("app.rag.rag_service.record_rag_metrics")
+@patch("app.rag.rag_service.log_rag_request")
+@patch("app.rag.rag_service.get_openai_client")
+@patch("app.rag.rag_service.rerank_results")
+@patch("app.rag.rag_service.hybrid_search")
+@patch("app.rag.rag_service.embed_text")
+@patch("app.rag.rag_service.resolve_retrieval_scope")
+def test_multi_company_prompt_enforces_comparison_contract(
+    mock_resolve_retrieval_scope,
+    mock_embed_text,
+    mock_hybrid_search,
+    mock_rerank_results,
+    mock_get_openai_client,
+    mock_log_rag_request,
+    mock_record_rag_metrics,
+):
+    document_ids = [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+        "44444444-4444-4444-4444-444444444444",
+    ]
+
+    companies = [
+        "Barclays Bank Plc",
+        "HSBC Holdings plc",
+        "Deutsche Bank",
+        "Standard Chartered Bank",
+    ]
+
+    mock_resolve_retrieval_scope.return_value = {
+        "company": None,
+        "companies": [
+            {"company_name": company}
+            for company in companies
+        ],
+        "selections": [],
+        "documents": [],
+        "document_ids": document_ids,
+        "filtered": True,
+    }
+
+    mock_embed_text.return_value = [0.1, 0.2]
+
+    retrieved = [
+        {
+            "document": f"company-{number}.pdf",
+            "document_id": document_id,
+            "page": number,
+            "chunk": 1,
+            "content": (
+                f"{company} reported profit before tax."
+            ),
+            "semantic_similarity": 0.9,
+            "final_score": 0.9,
+        }
+        for number, (document_id, company) in enumerate(
+            zip(document_ids, companies),
+            start=1,
+        )
+    ]
+
+    mock_hybrid_search.return_value = retrieved
+    mock_rerank_results.return_value = retrieved
+
+    client = mock_get_openai_client.return_value
+    client.responses.create.return_value.output_text = (
+        "Comparison answer"
+    )
+
+    answer_question(
+        "Compare Barclays Bank Plc, HSBC Holdings plc, "
+        "Deutsche Bank and Standard Chartered Bank using "
+        "their 2025 annual reports.",
+        request_id="multi-company-prompt-test",
+    )
+
+    prompt = client.responses.create.call_args.kwargs["input"]
+
+    assert (
+        "MULTI-COMPANY COMPARISON CONTROL:"
+        in prompt
+    )
+    assert "ENABLED" in prompt
+    assert (
+        "Never use one company's evidence to answer "
+        "for another company."
+        in prompt
+    )
+    assert (
+        "Markdown comparison table"
+        in prompt
+    )
+    assert (
+        "Source Document, and Page"
+        in prompt
+    )
+    assert (
+        "brief evidence-grounded comparative analysis"
+        in prompt
+    )

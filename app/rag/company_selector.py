@@ -80,25 +80,13 @@ def _company_match_strength(
     Returns the length of the longest consecutive company-name
     phrase present in the question.
 
-    Example:
-
-        registered:
-            Dangote Petroleum Refinery FZE
-
-        question:
-            Show Dangote Petroleum Refinery revenue
-
-        strength:
-            3
-
-    A single token such as "Dangote" is retained for ambiguity
-    detection, but must never defeat a more specific phrase.
+    A partial company name is retained for ambiguity detection,
+    but must never defeat a more specific phrase.
     """
 
     question_tokens = _normalize_tokens(
         question
     )
-
     company_tokens = (
         _meaningful_company_tokens(
             company_name
@@ -114,7 +102,6 @@ def _company_match_strength(
     question_length = len(
         question_tokens
     )
-
     company_length = len(
         company_tokens
     )
@@ -158,18 +145,14 @@ def resolve_company_from_question(
     companies: list[dict],
 ) -> dict | None:
     """
-    Resolve an issuer from registered EquityAI companies.
+    Resolve one issuer from registered EquityAI companies.
 
     Matching priority:
-
     1. Exact ticker token.
     2. Most-specific company-name phrase.
     3. Exchange disambiguation.
 
     Tickerless issuers are supported.
-
-    A partial company name is accepted only when it resolves
-    uniquely at the strongest matching specificity.
 
     Returns None when no registered issuer is identified.
     Raises AmbiguousCompanyError when multiple issuers remain.
@@ -181,10 +164,6 @@ def resolve_company_from_question(
 
     if not normalized_question:
         return None
-
-    # -----------------------------------------------------
-    # 1. Ticker resolution
-    # -----------------------------------------------------
 
     ticker_matches = [
         company
@@ -200,10 +179,6 @@ def resolve_company_from_question(
         candidates = ticker_matches
 
     else:
-        # -------------------------------------------------
-        # 2. Company-name resolution
-        # -------------------------------------------------
-
         scored_candidates = []
 
         for company in companies:
@@ -248,10 +223,6 @@ def resolve_company_from_question(
     if len(candidates) == 1:
         return candidates[0]
 
-    # -----------------------------------------------------
-    # 3. Exchange disambiguation
-    # -----------------------------------------------------
-
     exchange_matches = [
         company
         for company in candidates
@@ -265,8 +236,6 @@ def resolve_company_from_question(
     if len(exchange_matches) == 1:
         return exchange_matches[0]
 
-    # Duplicate registry representations of the same issuer
-    # must not create false ambiguity.
     unique_identities = {
         (
             company.get("company_name"),
@@ -284,3 +253,95 @@ def resolve_company_from_question(
         "multiple registered issuers. Specify the company "
         "name, ticker, or exchange more precisely."
     )
+
+
+def resolve_companies_from_question(
+    question: str,
+    companies: list[dict],
+) -> list[dict]:
+    """
+    Resolve multiple explicitly identified registered issuers.
+
+    Multi-company matching is deliberately stricter than the
+    singular resolver. An issuer is selected when its exact
+    ticker or its complete meaningful company name occurs in
+    the question.
+
+    This prevents generic shared terms such as "bank" or
+    ambiguous partial names such as "Dangote" from expanding
+    accidentally to several issuers.
+    """
+
+    normalized_question = " ".join(
+        question.strip().split()
+    )
+
+    if not normalized_question:
+        return []
+
+    question_tokens = _normalize_tokens(
+        normalized_question
+    )
+
+    matches = []
+
+    for company in companies:
+        ticker = company.get("ticker")
+        company_name = company.get(
+            "company_name"
+        )
+
+        ticker_match = (
+            bool(ticker)
+            and _contains_token(
+                normalized_question,
+                ticker,
+            )
+        )
+
+        name_match = False
+
+        if company_name:
+            company_tokens = (
+                _meaningful_company_tokens(
+                    company_name
+                )
+            )
+
+            if company_tokens:
+                company_length = len(
+                    company_tokens
+                )
+
+                name_match = any(
+                    question_tokens[
+                        start:start + company_length
+                    ]
+                    == company_tokens
+                    for start in range(
+                        len(question_tokens)
+                        - company_length
+                        + 1
+                    )
+                )
+
+        if ticker_match or name_match:
+            matches.append(company)
+
+    resolved = []
+    seen = set()
+
+    for company in matches:
+        identity = (
+            company.get("company_name"),
+            company.get("ticker"),
+            company.get("exchange"),
+        )
+
+        if identity in seen:
+            continue
+
+        seen.add(identity)
+        resolved.append(company)
+
+    return resolved

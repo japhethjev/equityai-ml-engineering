@@ -493,3 +493,110 @@ def test_tickerless_company_resolves_documents_by_company_name(
     assert kwargs["ticker"] is None
     assert kwargs["company_name"] == "Barclays Bank Plc"
     assert kwargs["exchange"] == "LSE"
+
+
+@patch(
+    "app.rag.retrieval_scope.resolve_documents"
+)
+@patch(
+    "app.rag.retrieval_scope.list_registered_companies"
+)
+def test_multi_company_annual_comparison_resolves_each_company_report(
+    mock_list_companies,
+    mock_resolve_documents,
+):
+    barclays = {
+        "company_name": "Barclays Bank Plc",
+        "ticker": None,
+        "exchange": "LSE",
+    }
+    hsbc = {
+        "company_name": "HSBC Holdings plc",
+        "ticker": "HSBA",
+        "exchange": "LSE",
+    }
+    deutsche = {
+        "company_name": "Deutsche Bank",
+        "ticker": "DBK",
+        "exchange": "XETRA",
+    }
+    standard_chartered = {
+        "company_name": "Standard Chartered Bank",
+        "ticker": "STAN",
+        "exchange": "LSE",
+    }
+
+    documents_by_company = {
+        "Barclays Bank Plc": {
+            "document_id": "barclays-2025",
+            "company_name": "Barclays Bank Plc",
+        },
+        "HSBC Holdings plc": {
+            "document_id": "hsbc-2025",
+            "company_name": "HSBC Holdings plc",
+        },
+        "Deutsche Bank": {
+            "document_id": "deutsche-2025",
+            "company_name": "Deutsche Bank",
+        },
+        "Standard Chartered Bank": {
+            "document_id": "standard-chartered-2025",
+            "company_name": "Standard Chartered Bank",
+        },
+    }
+
+    mock_list_companies.return_value = [
+        barclays,
+        hsbc,
+        deutsche,
+        standard_chartered,
+    ]
+
+    def resolve_by_company(**kwargs):
+        document = documents_by_company.get(
+            kwargs["company_name"]
+        )
+        return [document] if document else []
+
+    mock_resolve_documents.side_effect = resolve_by_company
+
+    scope = resolve_retrieval_scope(
+        (
+            "Compare Barclays Bank Plc, HSBC Holdings plc, "
+            "Deutsche Bank and Standard Chartered Bank "
+            "using their 2025 annual reports."
+        )
+    )
+
+    assert scope["filtered"] is True
+    assert scope["company"] is None
+    assert scope["companies"] == [
+        barclays,
+        hsbc,
+        deutsche,
+        standard_chartered,
+    ]
+    assert scope["document_ids"] == [
+        "barclays-2025",
+        "hsbc-2025",
+        "deutsche-2025",
+        "standard-chartered-2025",
+    ]
+
+    assert mock_resolve_documents.call_count == 4
+
+    resolved_company_names = [
+        call.kwargs["company_name"]
+        for call in mock_resolve_documents.call_args_list
+    ]
+
+    assert resolved_company_names == [
+        "Barclays Bank Plc",
+        "HSBC Holdings plc",
+        "Deutsche Bank",
+        "Standard Chartered Bank",
+    ]
+
+    for call in mock_resolve_documents.call_args_list:
+        assert call.kwargs["report_type"] == "annual"
+        assert call.kwargs["fiscal_year"] == 2025

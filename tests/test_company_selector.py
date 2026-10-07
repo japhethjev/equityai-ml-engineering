@@ -3,6 +3,7 @@ import pytest
 from app.rag.company_selector import (
     AmbiguousCompanyError,
     resolve_company_from_question,
+    resolve_companies_from_question,
 )
 
 
@@ -148,3 +149,69 @@ def test_partial_company_name_does_not_guess_when_ambiguous():
             "Show Dangote revenue for the last 2 years.",
             companies,
         )
+
+
+def test_resolves_multiple_explicit_companies():
+    barclays = {
+        "company_name": "Barclays Bank Plc",
+        "ticker": None,
+        "exchange": "LSE",
+    }
+    hsbc = {
+        "company_name": "HSBC Holdings plc",
+        "ticker": "HSBA",
+        "exchange": "LSE",
+    }
+    deutsche = {
+        "company_name": "Deutsche Bank",
+        "ticker": "DBK",
+        "exchange": "XETRA",
+    }
+    standard_chartered = {
+        "company_name": "Standard Chartered Bank",
+        "ticker": "STAN",
+        "exchange": "LSE",
+    }
+
+    result = resolve_companies_from_question(
+        (
+            "Compare Barclays Bank Plc, HSBC Holdings plc, "
+            "Deutsche Bank and Standard Chartered Bank "
+            "using their 2025 annual reports."
+        ),
+        [
+            barclays,
+            hsbc,
+            deutsche,
+            standard_chartered,
+        ],
+    )
+
+    assert result == [
+        barclays,
+        hsbc,
+        deutsche,
+        standard_chartered,
+    ]
+
+
+def test_multi_company_resolver_does_not_expand_ambiguous_partial_name():
+    companies = [
+        {
+            "company_name": "Dangote Petroleum Refinery FZE",
+            "ticker": None,
+            "exchange": None,
+        },
+        {
+            "company_name": "Dangote Cement Plc",
+            "ticker": "DANGCEM",
+            "exchange": "NGX",
+        },
+    ]
+
+    result = resolve_companies_from_question(
+        "Compare Dangote revenue in 2025.",
+        companies,
+    )
+
+    assert result == []
