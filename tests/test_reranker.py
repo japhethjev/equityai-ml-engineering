@@ -101,7 +101,7 @@ def test_unrestricted_retrieval_preserves_top_n():
     assert selected == ranked[:3]
 
 
-def test_balanced_evidence_fills_remaining_slots_by_rank():
+def test_balanced_evidence_fills_remaining_slots_round_robin():
     first_id = "doc-2025"
     second_id = "doc-2026"
 
@@ -123,7 +123,7 @@ def test_balanced_evidence_fills_remaining_slots_by_rank():
 
     assert selected[0]["document_id"] == first_id
     assert selected[1]["document_id"] == second_id
-    assert selected[2]["content"] == "2026 second"
+    assert selected[2]["content"] == "2025 second"
 
 def test_profit_before_tax_evidence_outranks_generic_report_match():
     query = (

@@ -505,7 +505,7 @@ def test_comparison_uses_balanced_evidence_selection(
 @patch("app.rag.rag_service.hybrid_search")
 @patch("app.rag.rag_service.embed_text")
 @patch("app.rag.rag_service.resolve_retrieval_scope")
-def test_multi_company_evidence_limit_scales_with_documents(
+def test_multi_company_retrieval_is_scoped_per_document(
     mock_resolve_retrieval_scope,
     mock_embed_text,
     mock_hybrid_search,
@@ -518,53 +518,131 @@ def test_multi_company_evidence_limit_scales_with_documents(
         for number in range(1, 6)
     ]
 
+    companies = [
+        f"Company {number}"
+        for number in range(1, 6)
+    ]
+
+    documents = [
+        {
+            "document_id": document_id,
+            "document_name": f"company-{number}.pdf",
+            "company_name": company,
+            "fiscal_year": 2025,
+        }
+        for number, (document_id, company) in enumerate(
+            zip(document_ids, companies),
+            start=1,
+        )
+    ]
+
     mock_resolve_retrieval_scope.return_value = {
         "company": None,
         "companies": [
-            {"company_name": f"Company {number}"}
-            for number in range(1, 6)
+            {"company_name": company}
+            for company in companies
         ],
         "selections": [],
-        "documents": [],
+        "documents": documents,
         "document_ids": document_ids,
         "filtered": True,
     }
 
     mock_embed_text.return_value = [0.1, 0.2]
 
-    retrieved = [
-        {
-            "document": f"company-{number}.pdf",
-            "document_id": document_id,
-            "page": 1,
-            "chunk": 1,
-            "content": f"Company {number} evidence",
-            "semantic_similarity": 0.9,
-        }
-        for number, document_id in enumerate(
-            document_ids,
+    results_by_document = {
+        document_id: [
+            {
+                "document": f"company-{number}.pdf",
+                "document_id": document_id,
+                "page": 1,
+                "chunk": 1,
+                "content": f"{company} evidence",
+                "semantic_similarity": 0.9,
+                "final_score": 0.9,
+            }
+        ]
+        for number, (document_id, company) in enumerate(
+            zip(document_ids, companies),
             start=1,
         )
+    }
+
+    mock_hybrid_search.side_effect = [
+        results_by_document[document_id]
+        for document_id in document_ids
     ]
 
-    mock_hybrid_search.return_value = retrieved
-    mock_rerank_results.return_value = retrieved
+    mock_rerank_results.side_effect = (
+        lambda query, results: results
+    )
 
     error = RuntimeError("Stop after dynamic selection")
     mock_select_balanced_evidence.side_effect = error
+
+    question = (
+        "Compare Company 1, Company 2, Company 3, "
+        "Company 4 and Company 5 for profit before tax in 2025."
+    )
 
     with pytest.raises(
         RuntimeError,
         match="Stop after dynamic selection",
     ):
         answer_question(
-            "Compare Company 1, Company 2, Company 3, "
-            "Company 4 and Company 5.",
-            request_id="multi-company-limit-test",
+            question,
+            request_id="multi-company-scope-test",
         )
 
+    assert mock_embed_text.call_count == 5
+    assert mock_hybrid_search.call_count == 5
+    assert mock_rerank_results.call_count == 5
+
+    for index, (
+        document_id,
+        company,
+    ) in enumerate(
+        zip(document_ids, companies)
+    ):
+        targeted_query = (
+            f"Company: {company}\n"
+            "Fiscal year: 2025\n"
+            "Requested metric: Profit before tax"
+        )
+
+        assert (
+            mock_embed_text.call_args_list[index].args[0]
+            == targeted_query
+        )
+
+        for other_company in companies:
+            if other_company == company:
+                continue
+
+            assert other_company not in targeted_query
+
+        assert (
+            mock_hybrid_search.call_args_list[index].kwargs
+            == {
+                "query": targeted_query,
+                "query_embedding": [0.1, 0.2],
+                "limit": RERANK_CANDIDATE_LIMIT,
+                "document_ids": [document_id],
+            }
+        )
+
+        assert (
+            mock_rerank_results.call_args_list[index].args[0]
+            == targeted_query
+        )
+
+    combined_results = [
+        results_by_document[document_id][0]
+        for document_id in document_ids
+    ]
+
     mock_select_balanced_evidence.assert_called_once_with(
-        retrieved,
+        combined_results,
         document_ids=document_ids,
         limit=15,
     )
@@ -607,7 +685,18 @@ def test_multi_company_prompt_enforces_comparison_contract(
             for company in companies
         ],
         "selections": [],
-        "documents": [],
+        "documents": [
+            {
+                "document_id": document_id,
+                "document_name": f"company-{number}.pdf",
+                "company_name": company,
+                "fiscal_year": 2025,
+            }
+            for number, (document_id, company) in enumerate(
+                zip(document_ids, companies),
+                start=1,
+            )
+        ],
         "document_ids": document_ids,
         "filtered": True,
     }

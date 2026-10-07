@@ -168,16 +168,16 @@ def select_balanced_evidence(
     limit: int = 3,
 ) -> list[dict]:
     """
-    Select final evidence while preserving document coverage.
+    Select final evidence while preserving balanced document depth.
 
-    For multi-document retrieval, the highest-ranked available
-    chunk from each requested document is selected first.
-    Remaining slots are then filled by global reranking order.
+    For multi-document retrieval, evidence is selected round-robin
+    by requested document so one filing cannot monopolise the final
+    context. Within each document, original reranking order is
+    preserved.
 
     Single-document and unrestricted retrieval preserve the
     existing top-N behaviour.
     """
-
     if limit <= 0:
         raise ValueError(
             "limit must be greater than zero"
@@ -189,7 +189,6 @@ def select_balanced_evidence(
     if not document_ids or len(document_ids) <= 1:
         return ranked_results[:limit]
 
-    # Preserve requested document order while removing duplicates.
     requested_ids = list(
         dict.fromkeys(
             str(document_id)
@@ -197,41 +196,45 @@ def select_balanced_evidence(
         )
     )
 
-    selected = []
-    selected_positions = set()
+    results_by_document = {
+        document_id: []
+        for document_id in requested_ids
+    }
 
-    # First pass: best available chunk from each document.
-    for document_id in requested_ids:
-        if len(selected) >= limit:
-            break
+    for result in ranked_results:
+        result_document_id = result.get("document_id")
 
-        for position, result in enumerate(
-            ranked_results
-        ):
-            result_document_id = result.get(
-                "document_id"
-            )
-
-            if (
-                result_document_id is not None
-                and str(result_document_id)
-                == document_id
-            ):
-                selected.append(result)
-                selected_positions.add(position)
-                break
-
-    # Second pass: fill remaining capacity using global rank.
-    for position, result in enumerate(
-        ranked_results
-    ):
-        if len(selected) >= limit:
-            break
-
-        if position in selected_positions:
+        if result_document_id is None:
             continue
 
-        selected.append(result)
-        selected_positions.add(position)
+        normalized_id = str(result_document_id)
+
+        if normalized_id in results_by_document:
+            results_by_document[normalized_id].append(result)
+
+    selected = []
+    depth = 0
+
+    while len(selected) < limit:
+        added_this_round = False
+
+        for document_id in requested_ids:
+            document_results = results_by_document[
+                document_id
+            ]
+
+            if depth >= len(document_results):
+                continue
+
+            selected.append(document_results[depth])
+            added_this_round = True
+
+            if len(selected) >= limit:
+                break
+
+        if not added_this_round:
+            break
+
+        depth += 1
 
     return selected

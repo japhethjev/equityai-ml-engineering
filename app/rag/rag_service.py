@@ -11,6 +11,10 @@ from app.observability import (
     record_rag_metrics,
 )
 from app.rag.embedding_service import embed_text
+from app.rag.financial_analysis_request import (
+    extract_metric_keys,
+)
+from app.rag.financial_metrics import get_metric
 from app.rag.vector_store import hybrid_search
 from app.rag.reranker import (
     rerank_results,
@@ -29,6 +33,62 @@ ABSTENTION_TEXT = (
 # Retrieve enough candidates for reranking while keeping
 # the final evidence set small and focused.
 RERANK_CANDIDATE_LIMIT = 20
+
+
+def build_targeted_retrieval_query(
+    query: str,
+    document: dict,
+) -> str:
+    """
+    Build retrieval intent for one resolved financial document.
+
+    Recognised financial metrics use authoritative document metadata
+    and canonical metric labels so unrelated company names from a
+    multi-company question do not dilute retrieval.
+
+    Unrecognised questions retain the original query as a fallback.
+    """
+    company_name = (
+        document.get("company_name") or ""
+    ).strip()
+
+    metric_keys = extract_metric_keys(query)
+
+    if not metric_keys:
+        return (
+            f"Company: {company_name}\n"
+            f"Question: {query}"
+        )
+
+    parts = [
+        f"Company: {company_name}",
+    ]
+
+    report_type = document.get("report_type")
+
+    if report_type:
+        parts.append(
+            f"Report type: {report_type}"
+        )
+
+    fiscal_year = document.get("fiscal_year")
+
+    if fiscal_year is not None:
+        parts.append(
+            f"Fiscal year: {fiscal_year}"
+        )
+
+    metric_labels = [
+        get_metric(metric_key).label
+        for metric_key in metric_keys
+    ]
+
+    parts.append(
+        "Requested metric: "
+        + "; ".join(metric_labels)
+    )
+
+    return "\n".join(parts)
 
 
 # =========================================================
@@ -309,68 +369,168 @@ def answer_question(
         raise
 
     # =====================================================
-    # 2. EMBEDDING
+    # 2. EMBEDDING / RETRIEVAL / RERANKING
     # =====================================================
 
-    try:
-        with measure_stage(
-            "embedding",
-            timings,
-        ):
-            query_embedding = embed_text(
-                query
+    if multi_company_comparison:
+        ranked = []
+
+        documents = retrieval_scope.get("documents") or []
+
+        try:
+            with measure_stage(
+                "embedding",
+                timings,
+            ):
+                targeted_queries = []
+
+                for document in documents:
+                    targeted_query = (
+                        build_targeted_retrieval_query(
+                            query,
+                            document,
+                        )
+                    )
+
+                    targeted_queries.append(
+                        (
+                            document,
+                            targeted_query,
+                            embed_text(targeted_query),
+                        )
+                    )
+
+        except Exception as error:
+            record_error(
+                "embedding",
+                error,
             )
+            raise
 
-    except Exception as error:
-        record_error(
-            "embedding",
-            error,
-        )
-        raise
+        try:
+            with measure_stage(
+                "retrieval",
+                timings,
+            ):
+                retrieved_by_document = []
 
-    # =====================================================
-    # 2. HYBRID RETRIEVAL
-    # =====================================================
+                for (
+                    document,
+                    targeted_query,
+                    targeted_embedding,
+                ) in targeted_queries:
+                    document_id = str(
+                        document["document_id"]
+                    )
 
-    try:
-        with measure_stage(
-            "retrieval",
-            timings,
-        ):
-            retrieved = hybrid_search(
-                query=query,
-                query_embedding=query_embedding,
-                limit=RERANK_CANDIDATE_LIMIT,
-                document_ids=document_ids,
+                    document_results = hybrid_search(
+                        query=targeted_query,
+                        query_embedding=targeted_embedding,
+                        limit=RERANK_CANDIDATE_LIMIT,
+                        document_ids=[document_id],
+                    )
+
+                    retrieved_by_document.append(
+                        (
+                            targeted_query,
+                            document_results,
+                        )
+                    )
+
+                retrieved = [
+                    result
+                    for _, document_results
+                    in retrieved_by_document
+                    for result in document_results
+                ]
+
+        except Exception as error:
+            record_error(
+                "retrieval",
+                error,
             )
+            raise
 
-    except Exception as error:
-        record_error(
-            "retrieval",
-            error,
-        )
-        raise
+        try:
+            with measure_stage(
+                "reranking",
+                timings,
+            ):
+                for (
+                    targeted_query,
+                    document_results,
+                ) in retrieved_by_document:
+                    ranked.extend(
+                        rerank_results(
+                            targeted_query,
+                            document_results,
+                        )
+                    )
 
-    # =====================================================
-    # 3. RERANKING
-    # =====================================================
+                ranked.sort(
+                    key=lambda result: result["final_score"],
+                    reverse=True,
+                )
 
-    try:
-        with measure_stage(
-            "reranking",
-            timings,
-        ):
-            ranked = rerank_results(
-                query,
-                retrieved,
+        except Exception as error:
+            record_error(
+                "reranking",
+                error,
             )
+            raise
 
-    except Exception as error:
-        record_error(
-            "reranking",
-            error,
-        )
-        raise
+    else:
+        try:
+            with measure_stage(
+                "embedding",
+                timings,
+            ):
+                query_embedding = embed_text(
+                    query
+                )
+
+        except Exception as error:
+            record_error(
+                "embedding",
+                error,
+            )
+            raise
+
+        try:
+            with measure_stage(
+                "retrieval",
+                timings,
+            ):
+                retrieved = hybrid_search(
+                    query=query,
+                    query_embedding=query_embedding,
+                    limit=RERANK_CANDIDATE_LIMIT,
+                    document_ids=document_ids,
+                )
+
+        except Exception as error:
+            record_error(
+                "retrieval",
+                error,
+            )
+            raise
+
+        try:
+            with measure_stage(
+                "reranking",
+                timings,
+            ):
+                ranked = rerank_results(
+                    query,
+                    retrieved,
+                )
+
+        except Exception as error:
+            record_error(
+                "reranking",
+                error,
+            )
+            raise
 
     evidence_limit = (
         3 * len(document_ids)
