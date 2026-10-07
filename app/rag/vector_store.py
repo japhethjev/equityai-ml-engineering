@@ -429,6 +429,114 @@ def hybrid_search(
     ]
 
 
+def financial_metric_search(
+    document_id: str,
+    metric_terms: list[str],
+    fiscal_year: int | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """
+    Retrieve exact financial-metric candidates from one filing.
+
+    This lane is deliberately independent of semantic similarity.
+    It prevents front matter from excluding metric-bearing financial
+    statement chunks before Python reranking.
+    """
+    if limit <= 0:
+        raise ValueError(
+            "limit must be greater than zero"
+        )
+
+    normalized_terms = list(
+        dict.fromkeys(
+            term.strip()
+            for term in metric_terms
+            if term and term.strip()
+        )
+    )
+
+    if not normalized_terms:
+        return []
+
+    term_conditions = " OR ".join(
+        "dc.content ILIKE %s"
+        for _ in normalized_terms
+    )
+
+    term_score = " + ".join(
+        "CASE WHEN dc.content ILIKE %s "
+        "THEN 1 ELSE 0 END"
+        for _ in normalized_terms
+    )
+
+    params = [
+        str(document_id),
+        *[
+            f"%{term}%"
+            for term in normalized_terms
+        ],
+    ]
+
+    year_condition = ""
+
+    if fiscal_year is not None:
+        year_condition = " AND dc.content ILIKE %s"
+        params.append(
+            f"%{fiscal_year}%"
+        )
+
+    params.extend(
+        f"%{term}%"
+        for term in normalized_terms
+    )
+
+    params.append(limit)
+
+    sql = f"""
+        SELECT
+            dc.document,
+            dc.page,
+            dc.chunk,
+            dc.content,
+            dc.document_id,
+            0.0 AS semantic_similarity,
+            0.0 AS keyword_score
+        FROM document_chunks AS dc
+        WHERE dc.document_id = %s::uuid
+          AND ({term_conditions})
+          {year_condition}
+        ORDER BY
+            ({term_score}) DESC,
+            dc.page ASC,
+            dc.chunk ASC
+        LIMIT %s
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql,
+                tuple(params),
+            )
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "document": row[0],
+            "page": row[1],
+            "chunk": row[2],
+            "content": row[3],
+            "document_id": (
+                str(row[4])
+                if row[4] is not None
+                else None
+            ),
+            "semantic_similarity": row[5],
+            "keyword_score": row[6],
+        }
+        for row in rows
+    ]
+
 def list_documents() -> list[dict]:
     """
     Return document registry state and ingestion progress.

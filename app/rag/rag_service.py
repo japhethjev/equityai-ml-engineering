@@ -15,7 +15,10 @@ from app.rag.financial_analysis_request import (
     extract_metric_keys,
 )
 from app.rag.financial_metrics import get_metric
-from app.rag.vector_store import hybrid_search
+from app.rag.vector_store import (
+    financial_metric_search,
+    hybrid_search,
+)
 from app.rag.reranker import (
     rerank_results,
     select_balanced_evidence,
@@ -89,6 +92,54 @@ def build_targeted_retrieval_query(
     )
 
     return "\n".join(parts)
+
+
+def get_financial_metric_terms(
+    query: str,
+) -> list[str]:
+    """Return canonical labels and aliases for requested metrics."""
+    terms = []
+
+    for metric_key in extract_metric_keys(query):
+        metric = get_metric(metric_key)
+        terms.extend(
+            [
+                metric.label,
+                *metric.aliases,
+            ]
+        )
+
+    return list(
+        dict.fromkeys(
+            term
+            for term in terms
+            if term
+        )
+    )
+
+
+def merge_retrieval_candidates(
+    *candidate_sets: list[dict],
+) -> list[dict]:
+    """Merge retrieval lanes without duplicating the same chunk."""
+    merged = []
+    seen = set()
+
+    for candidate_set in candidate_sets:
+        for result in candidate_set:
+            identity = (
+                str(result.get("document_id")),
+                result.get("page"),
+                result.get("chunk"),
+            )
+
+            if identity in seen:
+                continue
+
+            seen.add(identity)
+            merged.append(result)
+
+    return merged
 
 
 # =========================================================
@@ -423,11 +474,36 @@ def answer_question(
                         document["document_id"]
                     )
 
-                    document_results = hybrid_search(
+                    hybrid_results = hybrid_search(
                         query=targeted_query,
                         query_embedding=targeted_embedding,
                         limit=RERANK_CANDIDATE_LIMIT,
                         document_ids=[document_id],
+                    )
+
+                    metric_terms = (
+                        get_financial_metric_terms(query)
+                    )
+
+                    metric_results = []
+
+                    if metric_terms:
+                        metric_results = (
+                            financial_metric_search(
+                                document_id=document_id,
+                                metric_terms=metric_terms,
+                                fiscal_year=document.get(
+                                    "fiscal_year"
+                                ),
+                                limit=RERANK_CANDIDATE_LIMIT,
+                            )
+                        )
+
+                    document_results = (
+                        merge_retrieval_candidates(
+                            hybrid_results,
+                            metric_results,
+                        )
                     )
 
                     retrieved_by_document.append(

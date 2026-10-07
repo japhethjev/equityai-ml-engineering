@@ -502,6 +502,7 @@ def test_comparison_uses_balanced_evidence_selection(
 @patch("app.rag.rag_service.log_rag_error")
 @patch("app.rag.rag_service.select_balanced_evidence")
 @patch("app.rag.rag_service.rerank_results")
+@patch("app.rag.rag_service.financial_metric_search")
 @patch("app.rag.rag_service.hybrid_search")
 @patch("app.rag.rag_service.embed_text")
 @patch("app.rag.rag_service.resolve_retrieval_scope")
@@ -509,6 +510,7 @@ def test_multi_company_retrieval_is_scoped_per_document(
     mock_resolve_retrieval_scope,
     mock_embed_text,
     mock_hybrid_search,
+    mock_financial_metric_search,
     mock_rerank_results,
     mock_select_balanced_evidence,
     mock_log_rag_error,
@@ -573,8 +575,43 @@ def test_multi_company_retrieval_is_scoped_per_document(
         for document_id in document_ids
     ]
 
+    metric_results_by_document = {
+        document_id: [
+            {
+                "document": f"company-{number}.pdf",
+                "document_id": document_id,
+                "page": 200 + number,
+                "chunk": 20 + number,
+                "content": (
+                    f"{company} profit before tax 2025 "
+                    f"financial statement evidence"
+                ),
+                "semantic_similarity": 0.0,
+                "keyword_score": 0.0,
+            }
+        ]
+        for number, (document_id, company) in enumerate(
+            zip(document_ids, companies),
+            start=1,
+        )
+    }
+
+    mock_financial_metric_search.side_effect = [
+        metric_results_by_document[document_id]
+        for document_id in document_ids
+    ]
+
     mock_rerank_results.side_effect = (
-        lambda query, results: results
+        lambda query, results: [
+            {
+                **result,
+                "final_score": result.get(
+                    "final_score",
+                    0.8,
+                ),
+            }
+            for result in results
+        ]
     )
 
     error = RuntimeError("Stop after dynamic selection")
@@ -596,6 +633,7 @@ def test_multi_company_retrieval_is_scoped_per_document(
 
     assert mock_embed_text.call_count == 5
     assert mock_hybrid_search.call_count == 5
+    assert mock_financial_metric_search.call_count == 5
     assert mock_rerank_results.call_count == 5
 
     for index, (
@@ -631,21 +669,75 @@ def test_multi_company_retrieval_is_scoped_per_document(
             }
         )
 
+        metric_call = (
+            mock_financial_metric_search
+            .call_args_list[index]
+        )
+
+        assert metric_call.kwargs["document_id"] == document_id
+        assert metric_call.kwargs["fiscal_year"] == 2025
+        assert (
+            metric_call.kwargs["limit"]
+            == RERANK_CANDIDATE_LIMIT
+        )
+        assert (
+            "Profit before tax"
+            in metric_call.kwargs["metric_terms"]
+        )
+
         assert (
             mock_rerank_results.call_args_list[index].args[0]
             == targeted_query
         )
 
-    combined_results = [
-        results_by_document[document_id][0]
-        for document_id in document_ids
-    ]
+        rerank_candidates = (
+            mock_rerank_results
+            .call_args_list[index]
+            .args[1]
+        )
 
-    mock_select_balanced_evidence.assert_called_once_with(
-        combined_results,
-        document_ids=document_ids,
-        limit=15,
+        assert results_by_document[document_id][0] in rerank_candidates
+        assert (
+            metric_results_by_document[document_id][0]
+            in rerank_candidates
+        )
+
+    mock_select_balanced_evidence.assert_called_once()
+
+    selector_call = (
+        mock_select_balanced_evidence.call_args
     )
+
+    selector_candidates = selector_call.args[0]
+
+    assert len(selector_candidates) == 10
+
+    for document_id in document_ids:
+        document_candidates = [
+            result
+            for result in selector_candidates
+            if result["document_id"] == document_id
+        ]
+
+        assert len(document_candidates) == 2
+
+        assert any(
+            result["page"] == 1
+            for result in document_candidates
+        )
+
+        assert any(
+            result["page"]
+            == metric_results_by_document[
+                document_id
+            ][0]["page"]
+            for result in document_candidates
+        )
+
+    assert selector_call.kwargs == {
+        "document_ids": document_ids,
+        "limit": 15,
+    }
 
 
 @patch("app.rag.rag_service.record_rag_metrics")
@@ -760,3 +852,36 @@ def test_multi_company_prompt_enforces_comparison_contract(
         "brief evidence-grounded comparative analysis"
         in prompt
     )
+
+
+def test_merge_retrieval_candidates_adds_metric_evidence_once():
+    from app.rag.rag_service import merge_retrieval_candidates
+
+    front_matter = {
+        "document_id": "doc-1",
+        "page": 3,
+        "chunk": 1,
+        "content": "Annual report 2025",
+    }
+
+    pbt_evidence = {
+        "document_id": "doc-1",
+        "page": 363,
+        "chunk": 12,
+        "content": "Profit before tax 2025 9,139",
+    }
+
+    merged = merge_retrieval_candidates(
+        [
+            front_matter,
+            pbt_evidence,
+        ],
+        [
+            pbt_evidence.copy(),
+        ],
+    )
+
+    assert merged == [
+        front_matter,
+        pbt_evidence,
+    ]

@@ -919,3 +919,89 @@ def test_resolve_documents_requires_ticker_or_company_name():
             "Expected missing ticker and company_name "
             "to be rejected"
         )
+
+
+@patch("app.rag.vector_store.get_connection")
+def test_financial_metric_search_is_document_and_year_scoped(
+    mock_get_connection,
+):
+    from app.rag.vector_store import financial_metric_search
+
+    rows = [
+        (
+            "barclays-2025.pdf",
+            363,
+            12,
+            "Profit before tax 2025 9,139 2024 8,108",
+            DOCUMENT_ID,
+            0.0,
+            0.0,
+        )
+    ]
+
+    connection_context, cursor = make_connection(rows)
+    mock_get_connection.return_value = connection_context
+
+    results = financial_metric_search(
+        document_id=DOCUMENT_ID,
+        metric_terms=[
+            "Profit before tax",
+            "pre-tax profit",
+            "pbt",
+        ],
+        fiscal_year=2025,
+        limit=20,
+    )
+
+    cursor.execute.assert_called_once()
+
+    sql = cursor.execute.call_args.args[0]
+    params = cursor.execute.call_args.args[1]
+
+    assert "WHERE dc.document_id = %s::uuid" in sql
+    assert "dc.content ILIKE %s" in sql
+    assert "CASE WHEN dc.content ILIKE %s" in sql
+    assert "ORDER BY" in sql
+    assert params == (
+        DOCUMENT_ID,
+        "%Profit before tax%",
+        "%pre-tax profit%",
+        "%pbt%",
+        "%2025%",
+        "%Profit before tax%",
+        "%pre-tax profit%",
+        "%pbt%",
+        20,
+    )
+
+    assert results == [
+        {
+            "document": "barclays-2025.pdf",
+            "page": 363,
+            "chunk": 12,
+            "content": (
+                "Profit before tax 2025 9,139 "
+                "2024 8,108"
+            ),
+            "document_id": DOCUMENT_ID,
+            "semantic_similarity": 0.0,
+            "keyword_score": 0.0,
+        }
+    ]
+
+
+@patch("app.rag.vector_store.get_connection")
+def test_financial_metric_search_empty_terms_skips_database(
+    mock_get_connection,
+):
+    from app.rag.vector_store import financial_metric_search
+
+    results = financial_metric_search(
+        document_id=DOCUMENT_ID,
+        metric_terms=[],
+        fiscal_year=2025,
+        limit=20,
+    )
+
+    assert results == []
+    mock_get_connection.assert_not_called()
