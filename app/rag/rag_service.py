@@ -373,8 +373,8 @@ def answer_question(
         raise
 
     evidence_limit = (
-        max(3, len(document_ids))
-        if document_ids
+        3 * len(document_ids)
+        if multi_company_comparison
         else 3
     )
 

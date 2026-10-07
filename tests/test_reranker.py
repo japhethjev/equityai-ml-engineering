@@ -160,3 +160,47 @@ def test_profit_before_tax_evidence_outranks_generic_report_match():
 
     assert ranked[0]["page"] == 16
     assert ranked[0]["chunk"] == 1
+
+
+def test_balanced_evidence_supports_depth_across_documents():
+    document_ids = [
+        "company-a",
+        "company-b",
+        "company-c",
+        "company-d",
+    ]
+
+    ranked = []
+
+    for rank in range(3):
+        for company_number, document_id in enumerate(
+            document_ids,
+            start=1,
+        ):
+            ranked.append(
+                make_result(
+                    document_id,
+                    1.0 - (
+                        rank * 0.10
+                        + company_number * 0.01
+                    ),
+                    (
+                        f"{document_id} evidence "
+                        f"{rank + 1}"
+                    ),
+                )
+            )
+
+    selected = select_balanced_evidence(
+        ranked,
+        document_ids=document_ids,
+        limit=12,
+    )
+
+    assert len(selected) == 12
+
+    for document_id in document_ids:
+        assert sum(
+            result["document_id"] == document_id
+            for result in selected
+        ) == 3

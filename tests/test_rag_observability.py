@@ -566,7 +566,7 @@ def test_multi_company_evidence_limit_scales_with_documents(
     mock_select_balanced_evidence.assert_called_once_with(
         retrieved,
         document_ids=document_ids,
-        limit=5,
+        limit=15,
     )
 
 
