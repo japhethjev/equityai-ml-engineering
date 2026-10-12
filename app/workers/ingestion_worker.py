@@ -28,6 +28,14 @@ REQUIRED_MESSAGE_FIELDS = (
 SQS_VISIBILITY_TIMEOUT_SECONDS = 900
 SQS_VISIBILITY_HEARTBEAT_SECONDS = 300
 
+logging.basicConfig(
+    level=logging.INFO,
+    format=(
+        "%(asctime)s | %(levelname)s | "
+        "%(name)s | %(message)s"
+    ),
+)
+
 logger = logging.getLogger("equityai-ingestion-worker")
 
 
@@ -432,6 +440,9 @@ def run_worker_once(
                 continue
 
         except Exception:
+            logger.exception(
+                "Document ingestion message processing failed"
+            )
             # Do not acknowledge failed work. SQS will make the
             # message visible again after the visibility timeout.
             continue
