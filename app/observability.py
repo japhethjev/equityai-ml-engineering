@@ -521,3 +521,42 @@ def log_rag_error(
             "total_ms"
         ),
     )
+
+def log_rag_evidence_diagnostic(
+    *,
+    request_id: str,
+    document_id: str,
+    stage: str,
+    candidates: list[dict],
+) -> None:
+    """Log retrieval evidence metadata without document content."""
+    logger.info(
+        "event=rag_evidence_diagnostic "
+        "request_id=%s "
+        "document_id=%s "
+        "stage=%s "
+        "count=%s "
+        "pages=%s "
+        "chunks=%s "
+        "scores=%s "
+        "evidence_bonuses=%s "
+        "retrieval_lanes=%s",
+        request_id,
+        document_id,
+        stage,
+        len(candidates),
+        [item.get("page") for item in candidates[:5]],
+        [item.get("chunk") for item in candidates[:5]],
+        [
+            round(float(item.get("final_score") or 0), 3)
+            for item in candidates[:5]
+        ],
+        [
+            round(float(item.get("evidence_bonus") or 0), 3)
+            for item in candidates[:5]
+        ],
+        [
+            item.get("retrieval_lanes", [])
+            for item in candidates[:5]
+        ],
+    )

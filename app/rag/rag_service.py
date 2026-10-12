@@ -6,6 +6,7 @@ from openai import OpenAI
 from app.observability import (
     create_request_id,
     log_rag_error,
+    log_rag_evidence_diagnostic,
     log_rag_request,
     measure_stage,
     record_rag_metrics,
@@ -123,9 +124,11 @@ def merge_retrieval_candidates(
 ) -> list[dict]:
     """Merge retrieval lanes without duplicating the same chunk."""
     merged = []
-    seen = set()
+    by_identity = {}
 
-    for candidate_set in candidate_sets:
+    for lane_index, candidate_set in enumerate(candidate_sets):
+        lane = "hybrid" if lane_index == 0 else "financial_metric"
+
         for result in candidate_set:
             identity = (
                 str(result.get("document_id")),
@@ -133,11 +136,16 @@ def merge_retrieval_candidates(
                 result.get("chunk"),
             )
 
-            if identity in seen:
+            if identity in by_identity:
+                existing = by_identity[identity]
+                if lane not in existing["retrieval_lanes"]:
+                    existing["retrieval_lanes"].append(lane)
                 continue
 
-            seen.add(identity)
-            merged.append(result)
+            candidate = result.copy()
+            candidate["retrieval_lanes"] = [lane]
+            by_identity[identity] = candidate
+            merged.append(candidate)
 
     return merged
 
@@ -499,6 +507,13 @@ def answer_question(
                             )
                         )
 
+                    log_rag_evidence_diagnostic(
+                        request_id=request_id,
+                        document_id=document_id,
+                        stage="metric_retrieval",
+                        candidates=metric_results,
+                    )
+
                     document_results = (
                         merge_retrieval_candidates(
                             hybrid_results,
@@ -536,12 +551,21 @@ def answer_question(
                     targeted_query,
                     document_results,
                 ) in retrieved_by_document:
-                    ranked.extend(
-                        rerank_results(
-                            targeted_query,
-                            document_results,
-                        )
+                    document_ranked = rerank_results(
+                        targeted_query,
+                        document_results,
                     )
+
+                    log_rag_evidence_diagnostic(
+                        request_id=request_id,
+                        document_id=str(
+                            document_ranked[0]["document_id"]
+                        ) if document_ranked else "empty",
+                        stage="reranked",
+                        candidates=document_ranked,
+                    )
+
+                    ranked.extend(document_ranked)
 
                 ranked.sort(
                     key=lambda result: result["final_score"],
@@ -619,6 +643,21 @@ def answer_question(
         document_ids=document_ids,
         limit=evidence_limit,
     )
+
+    if multi_company_comparison:
+        for document_id in document_ids:
+            selected_for_document = [
+                result
+                for result in top_results
+                if str(result.get("document_id")) == str(document_id)
+            ]
+
+            log_rag_evidence_diagnostic(
+                request_id=request_id,
+                document_id=str(document_id),
+                stage="selected",
+                candidates=selected_for_document,
+            )
 
     # =====================================================
     # 4. EMPTY RETRIEVAL

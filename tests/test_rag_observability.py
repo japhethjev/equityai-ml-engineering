@@ -696,11 +696,25 @@ def test_multi_company_retrieval_is_scoped_per_document(
             .args[1]
         )
 
-        assert results_by_document[document_id][0] in rerank_candidates
+        assert len(rerank_candidates) == 2
+
+        assert rerank_candidates[0]["document_id"] == document_id
+        assert rerank_candidates[0]["page"] == 1
+        assert rerank_candidates[0]["chunk"] == 1
+        assert rerank_candidates[0]["retrieval_lanes"] == ["hybrid"]
+
+        assert rerank_candidates[1]["document_id"] == document_id
         assert (
-            metric_results_by_document[document_id][0]
-            in rerank_candidates
+            rerank_candidates[1]["page"]
+            == metric_results_by_document[document_id][0]["page"]
         )
+        assert (
+            rerank_candidates[1]["chunk"]
+            == metric_results_by_document[document_id][0]["chunk"]
+        )
+        assert rerank_candidates[1]["retrieval_lanes"] == [
+            "financial_metric"
+        ]
 
     mock_select_balanced_evidence.assert_called_once()
 
@@ -881,7 +895,17 @@ def test_merge_retrieval_candidates_adds_metric_evidence_once():
         ],
     )
 
-    assert merged == [
-        front_matter,
-        pbt_evidence,
-    ]
+    assert len(merged) == 2
+
+    assert merged[0] == {
+        **front_matter,
+        "retrieval_lanes": ["hybrid"],
+    }
+
+    assert merged[1] == {
+        **pbt_evidence,
+        "retrieval_lanes": ["hybrid", "financial_metric"],
+    }
+
+    assert "retrieval_lanes" not in front_matter
+    assert "retrieval_lanes" not in pbt_evidence
