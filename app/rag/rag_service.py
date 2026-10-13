@@ -295,6 +295,32 @@ def get_openai_client() -> OpenAI:
 # =========================================================
 
 
+
+def requests_broad_financial_analysis(query: str) -> bool:
+    """Identify requests requiring synthesis across financial evidence."""
+    normalized = " ".join(query.lower().split())
+
+    broad_phrases = (
+        "analyse",
+        "analyze",
+        "analysis of",
+        "financial performance",
+        "financial health",
+        "major risks",
+        "key risks",
+        "risk assessment",
+        "financial position",
+        "financial review",
+        "investment analysis",
+    )
+
+    return any(
+        phrase in normalized
+        for phrase in broad_phrases
+    )
+
+
+
 def answer_question(
     query: str,
     request_id: str | None = None,
@@ -632,10 +658,16 @@ def answer_question(
             )
             raise
 
+    broad_analysis = requests_broad_financial_analysis(query)
+
+    evidence_per_document = (
+        6 if broad_analysis else 3
+    )
+
     evidence_limit = (
-        3 * len(document_ids)
+        evidence_per_document * len(document_ids)
         if multi_company_comparison
-        else 3
+        else evidence_per_document
     )
 
     top_results = select_balanced_evidence(
@@ -829,21 +861,34 @@ This restriction includes, but is not limited to:
     Clearly identify the result as calculated or derived rather
     than directly reported.
 
-14. If the evidence does not directly and sufficiently answer the
-    exact question, and calculation permission is NOT ALLOWED,
-    respond with EXACTLY:
+14. EVIDENCE SUFFICIENCY AND PROPORTIONATE ANSWERING
+
+Assess each requested fact or analytical component separately.
+
+- When evidence fully supports the question, answer completely.
+- When evidence supports only part of the question, answer the
+  supported parts and explicitly identify the missing information.
+- For broad financial analysis, synthesise supported findings and
+  explain their implications without inventing additional facts.
+- For multi-company questions, evaluate each company's evidence
+  independently and disclose unavailable company-specific figures.
+- Do not substitute related metrics, reporting periods, entities,
+  or accounting bases for the requested information.
+- Cite the supporting document and page for material financial claims.
+- If NO substantive requested component is supported, respond EXACTLY:
 
 "{ABSTENTION_TEXT}"
 
-Do not add a source, explanation, related figure, alternative
-answer, calculation, or additional sentence after this abstention
-response.
+Do not add unsupported facts or unrelated financial information
+to avoid abstention.
 
 
 STAGE 2 — ANSWER
 
-Only if Stage 1 determines that sufficient direct evidence exists,
-or calculation permission is explicitly ALLOWED:
+If Stage 1 identifies sufficient evidence for at least one
+substantive requested component, answer that component and clearly
+identify any unsupported requested components. Calculation permission
+does not replace the requirement for supporting evidence.
 
 15. Answer the exact question asked.
 
@@ -899,8 +944,12 @@ If CALCULATION PERMISSION is NOT ALLOWED:
 - A reported dividend and market price do NOT constitute a
   directly reported dividend yield.
 
-- If the exact requested metric is not explicitly stated in the
-  retrieved evidence, respond EXACTLY:
+- If a requested metric is not explicitly reported in the
+  retrieved evidence, do not provide a numerical value for it.
+- In a multi-part question, mark that metric as not verified
+  and continue with other supported requested components.
+- In a single-metric factual question, if the requested metric
+  is unsupported, respond EXACTLY:
 
 "{ABSTENTION_TEXT}"
 
@@ -930,8 +979,11 @@ When ENABLED:
   accounting bases, or definitions differ.
 - After the table, provide a brief evidence-grounded comparative analysis.
 - Do not calculate metrics unless CALCULATION PERMISSION is ALLOWED.
-- If evidence is insufficient, apply the Stage 1 abstention rules rather
-  than filling a company's result from another company's evidence.
+- If evidence is missing for an individual company, mark its result
+  as "Not verified from retrieved evidence".
+- Do not substitute another company's results.
+- If no requested company has sufficient evidence for the requested
+  metric, apply the Stage 1 abstention rule.
 
 When DISABLED:
 - Follow the normal concise answer format above.
