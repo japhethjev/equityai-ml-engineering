@@ -381,33 +381,31 @@ def looks_like_unrequested_calculation(
     answer: str,
 ) -> bool:
     """
-    Detect an answer that explicitly presents itself as
-    a calculated or derived result.
+    Detect explicit claims that a calculation was performed.
 
-    This is a defensive post-generation guard.
-
-    It does not attempt to classify every numeric answer.
-    Instead, it catches explicit evidence that the model
-    performed a calculation when calculation was not
-    authorised by the user.
+    Avoid rejecting ordinary financial commentary or statements
+    that a calculation was unavailable.
     """
+    import re
 
-    normalized_answer = " ".join(
-        answer.lower().split()
-    )
+    text = " ".join(answer.lower().split())
 
-    calculation_markers = (
-        "calculated",
-        "calculation:",
-        "derived",
-        "computed",
-        "work out",
-        "÷",
+    patterns = (
+        r"\b(?:i|we)\s+(?:have\s+)?calculated\b",
+        r"\b(?:i|we)\s+(?:have\s+)?computed\b",
+        r"\b(?:the|a)\s+(?:calculated|computed|derived)\s+"
+        r"(?:growth rate|margin|ratio|yield|percentage|result)\s+"
+        r"(?:is|was|equals|of)\s+[-+]?\d",
+        r"\bcalculation\s*:\s*[-+]?\d",
+        r"\b(?:calculated|computed)\s+"
+        r"(?:as|at|to be|equals)\s+[-+]?\d",
+        r"\d[\d,.]*\s*÷\s*\d",
+        r"\b(?:revenue|profit|assets|income|cost)\s*÷",
     )
 
     return any(
-        marker in normalized_answer
-        for marker in calculation_markers
+        re.search(pattern, text)
+        for pattern in patterns
     )
 
 
