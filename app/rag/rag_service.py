@@ -875,12 +875,12 @@ Assess each requested fact or analytical component separately.
 - Do not substitute related metrics, reporting periods, entities,
   or accounting bases for the requested information.
 - Cite the supporting document and page for material financial claims.
-- If NO substantive requested component is supported, respond EXACTLY:
-
-"{ABSTENTION_TEXT}"
-
-Do not add unsupported facts or unrelated financial information
-to avoid abstention.
+- If no substantive requested component is supported, explain
+  that the requested information could not be verified from the
+  retrieved documents. Do not invent figures or substitute unrelated
+  information.
+- If some components are supported, answer them and identify
+  unsupported components explicitly.
 
 
 STAGE 2 — ANSWER
@@ -949,9 +949,8 @@ If CALCULATION PERMISSION is NOT ALLOWED:
 - In a multi-part question, mark that metric as not verified
   and continue with other supported requested components.
 - In a single-metric factual question, if the requested metric
-  is unsupported, respond EXACTLY:
-
-"{ABSTENTION_TEXT}"
+  is unsupported, state "Not verified from retrieved evidence"
+  and briefly explain the evidence limitation.
 
 
 If CALCULATION PERMISSION is ALLOWED:
@@ -983,7 +982,8 @@ When ENABLED:
   as "Not verified from retrieved evidence".
 - Do not substitute another company's results.
 - If no requested company has sufficient evidence for the requested
-  metric, apply the Stage 1 abstention rule.
+  metric, mark each result "Not verified from retrieved evidence"
+  and explain the evidence limitation without inventing figures.
 
 When DISABLED:
 - Follow the normal concise answer format above.
@@ -1044,8 +1044,13 @@ RETRIEVED EVIDENCE:
                     answer
                 )
             ):
-                answer = ABSTENTION_TEXT
-                generation_outcome = "GUARD_ABSTENTION"
+                answer = (
+                    "The generated response contained a calculation "
+                    "that was not authorised or verified against the "
+                    "retrieved evidence. The requested result cannot "
+                    "be reliably reported from the available evidence."
+                )
+                generation_outcome = "GUARD_BLOCKED_CALCULATION"
 
             print(
                 "RAG_GENERATION_DIAGNOSTIC "

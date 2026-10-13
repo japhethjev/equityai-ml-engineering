@@ -123,7 +123,7 @@ def test_evidence_sufficiency_prompt(
     assert "EVIDENCE SUFFICIENCY AND PROPORTIONATE ANSWERING" in prompt
     assert "answer the" in prompt.lower()
     assert "supported parts" in prompt
-    assert "NO substantive requested component" in prompt
+    assert "If no substantive requested component is supported" in prompt
 
     if expected_mode == "broad":
         assert "synthesise supported findings" in prompt
