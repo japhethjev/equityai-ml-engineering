@@ -78,6 +78,15 @@ def resolve_financial_analysis_scope(
     if not request.is_financial_analysis:
         return None
 
+    # Route non-historical financial comparisons to the
+    # existing RAG comparison workflow before resolving
+    # a single company.
+    if (
+        request.period_type is None
+        or request.period_count is None
+    ):
+        return None
+
     companies = list_registered_companies()
 
     company = resolve_company_from_question(
@@ -90,19 +99,6 @@ def resolve_financial_analysis_scope(
             "A registered company or ticker is required "
             "for financial analysis."
         )
-
-    # Historical requests explicitly specify their period basis
-    # and count through the request parser.
-    #
-    # A comparison or analytical request without an explicit
-    # historical horizon is deliberately not guessed here.
-    # That will be handled by exact-period/company comparison
-    # logic separately.
-    if (
-        request.period_type is None
-        or request.period_count is None
-    ):
-        return None
 
     documents = resolve_historical_documents(
         ticker=company.get("ticker"),
