@@ -1019,6 +1019,12 @@ RETRIEVED EVIDENCE:
                 response.output_text.strip()
             )
 
+            generation_outcome = (
+                "MODEL_ABSTENTION"
+                if answer == ABSTENTION_TEXT
+                else "MODEL_ANSWERED"
+            )
+
             # -------------------------------------------------
             # Defensive deterministic calculation guard
             # -------------------------------------------------
@@ -1039,6 +1045,14 @@ RETRIEVED EVIDENCE:
                 )
             ):
                 answer = ABSTENTION_TEXT
+                generation_outcome = "GUARD_ABSTENTION"
+
+            print(
+                "RAG_GENERATION_DIAGNOSTIC "
+                f"request_id={request_id} "
+                f"generation_outcome={generation_outcome}",
+                flush=True,
+            )
 
     except Exception as error:
         record_error(
