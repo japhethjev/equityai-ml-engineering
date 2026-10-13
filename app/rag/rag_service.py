@@ -39,6 +39,37 @@ ABSTENTION_TEXT = (
 RERANK_CANDIDATE_LIMIT = 20
 
 
+# Evidence categories for comprehensive financial analysis.
+# Each category will be retrieved independently to improve
+# coverage across the financial statements and risk notes.
+BROAD_FINANCIAL_EVIDENCE_TERMS = {
+    "profitability": [
+        "revenue",
+        "profit before tax",
+        "profit for the year",
+        "operating profit",
+    ],
+    "financial_position": [
+        "total assets",
+        "total liabilities",
+        "total equity",
+        "borrowings",
+    ],
+    "cash_flows": [
+        "net cash generated from operating activities",
+        "cash flows from investing activities",
+        "cash flows from financing activities",
+    ],
+    "risks": [
+        "financial risk management",
+        "liquidity risk",
+        "credit risk",
+        "market risk",
+        "principal risks",
+    ],
+}
+
+
 def build_targeted_retrieval_query(
     query: str,
     document: dict,
@@ -119,6 +150,110 @@ def get_financial_metric_terms(
     )
 
 
+
+
+def retrieve_broad_financial_evidence(
+    document_ids: list[str],
+    limit_per_category: int = 8,
+) -> list[dict]:
+    """Retrieve and label financial evidence by category."""
+    by_identity = {}
+
+    for document_id in document_ids:
+        for category, terms in BROAD_FINANCIAL_EVIDENCE_TERMS.items():
+            candidates = financial_metric_search(
+                document_id=str(document_id),
+                metric_terms=terms,
+                fiscal_year=None,
+                limit=limit_per_category,
+            )
+
+            for result in candidates:
+                identity = (
+                    str(result.get("document_id")),
+                    result.get("page"),
+                    result.get("chunk"),
+                )
+
+                if identity not in by_identity:
+                    candidate = result.copy()
+                    candidate["evidence_categories"] = []
+                    by_identity[identity] = candidate
+
+                categories = by_identity[identity][
+                    "evidence_categories"
+                ]
+
+                if category not in categories:
+                    categories.append(category)
+
+    return list(by_identity.values())
+
+
+
+
+def select_broad_financial_evidence(
+    ranked_results: list[dict],
+    limit: int = 8,
+) -> list[dict]:
+    """Select evidence with financial-category coverage."""
+    if limit <= 0:
+        raise ValueError("limit must be greater than zero")
+
+    selected = []
+    seen = set()
+    covered = set()
+
+    def identity(result):
+        return (
+            str(result.get("document_id")),
+            result.get("page"),
+            result.get("chunk"),
+        )
+
+    # Greedily select passages covering the most missing
+    # categories, breaking ties by existing reranking order.
+    remaining = list(ranked_results)
+
+    while len(selected) < limit:
+        best = None
+        best_gain = 0
+
+        for result in remaining:
+            if identity(result) in seen:
+                continue
+
+            gain = len(
+                set(result.get("evidence_categories", []))
+                - covered
+            )
+
+            if gain > best_gain:
+                best = result
+                best_gain = gain
+
+        if best is None or best_gain == 0:
+            break
+
+        selected.append(best)
+        seen.add(identity(best))
+        covered.update(best.get("evidence_categories", []))
+
+    # Fill unused slots with the highest-ranked remaining
+    # passages, including ordinary hybrid-search evidence.
+    for result in ranked_results:
+        if len(selected) >= limit:
+            break
+
+        key = identity(result)
+
+        if key not in seen:
+            selected.append(result)
+            seen.add(key)
+
+    return selected
+
+
 def merge_retrieval_candidates(
     *candidate_sets: list[dict],
 ) -> list[dict]:
@@ -140,6 +275,16 @@ def merge_retrieval_candidates(
                 existing = by_identity[identity]
                 if lane not in existing["retrieval_lanes"]:
                     existing["retrieval_lanes"].append(lane)
+
+                for category in result.get(
+                    "evidence_categories", []
+                ):
+                    categories = existing.setdefault(
+                        "evidence_categories", []
+                    )
+                    if category not in categories:
+                        categories.append(category)
+
                 continue
 
             candidate = result.copy()
@@ -627,12 +772,27 @@ def answer_question(
                 "retrieval",
                 timings,
             ):
-                retrieved = hybrid_search(
+                hybrid_results = hybrid_search(
                     query=query,
                     query_embedding=query_embedding,
                     limit=RERANK_CANDIDATE_LIMIT,
                     document_ids=document_ids,
                 )
+
+                if (
+                    requests_broad_financial_analysis(query)
+                    and document_ids
+                ):
+                    broad_results = retrieve_broad_financial_evidence(
+                        document_ids=document_ids,
+                    )
+
+                    retrieved = merge_retrieval_candidates(
+                        hybrid_results,
+                        broad_results,
+                    )
+                else:
+                    retrieved = hybrid_results
 
         except Exception as error:
             record_error(
@@ -670,11 +830,17 @@ def answer_question(
         else evidence_per_document
     )
 
-    top_results = select_balanced_evidence(
-        ranked,
-        document_ids=document_ids,
-        limit=evidence_limit,
-    )
+    if broad_analysis and not multi_company_comparison and document_ids:
+        top_results = select_broad_financial_evidence(
+            ranked,
+            limit=8,
+        )
+    else:
+        top_results = select_balanced_evidence(
+            ranked,
+            document_ids=document_ids,
+            limit=evidence_limit,
+        )
 
     if multi_company_comparison:
         for document_id in document_ids:
